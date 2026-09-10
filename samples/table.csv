@@ -1,0 +1,4 @@
+name,role,status
+RemotePad,control surface,active
+Filesystem,browse/edit,ready
+Terminal,PTY sessions,ready

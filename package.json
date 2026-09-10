@@ -1,0 +1,18 @@
+{
+  "name": "remotepad",
+  "private": true,
+  "version": "0.1.0",
+  "description": "RemotePad — a lightweight control surface for remote development.",
+  "scripts": {
+    "dev": "pnpm --parallel --filter @remotepad/server --filter @remotepad/web dev",
+    "build": "pnpm --filter @remotepad/shared build && pnpm --filter @remotepad/web build && pnpm --filter @remotepad/server build",
+    "start": "pnpm --filter @remotepad/server start"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "packageManager": "pnpm@10.15.0",
+  "pnpm": {
+    "onlyBuiltDependencies": ["esbuild", "node-pty"]
+  }
+}

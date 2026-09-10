@@ -1,0 +1,3 @@
+{"id":1,"msg":"first record\nwith an escaped newline"}
+{"id":2,"msg":"second record\nspanning multiple lines\nin the rendered view"}
+{"id":3,"ok":true,"note":"plain"}

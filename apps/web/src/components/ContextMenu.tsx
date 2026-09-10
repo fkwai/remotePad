@@ -1,0 +1,48 @@
+import type { FsEntry } from '@remotepad/shared';
+
+export interface MenuState {
+  x: number;
+  y: number;
+  entry: FsEntry;
+}
+
+export function ContextMenu({
+  menu,
+  onClose,
+  onAction,
+  pinned,
+}: {
+  menu: MenuState;
+  onClose: () => void;
+  onAction: (action: string, entry: FsEntry) => void;
+  pinned: boolean;
+}) {
+  const isDir = menu.entry.kind === 'dir';
+  const actions = [
+    ...(isDir ? [[pinned ? 'unpin' : 'pin', pinned ? 'Unpin favorite' : 'Pin favorite'] as const] : []),
+    ['new-file', 'New file'],
+    ['new-dir', 'New folder'],
+    ['rename', 'Rename'],
+    ['delete', 'Delete'],
+    ['sep', ''],
+    ['term', 'Open terminal here'],
+  ] as const;
+
+  return (
+    <>
+      <div style={{ position: 'fixed', inset: 0, zIndex: 40 }} onClick={onClose} />
+      <div className="menu" style={{ left: menu.x, top: menu.y }}>
+        {actions.map(([id, label]) =>
+          id === 'sep' ? <hr key="sep" /> : (
+            <button
+              key={id}
+              className={id === 'delete' ? 'danger' : ''}
+              onClick={() => { onAction(id, menu.entry); onClose(); }}
+            >
+              {label}
+            </button>
+          ))}
+      </div>
+    </>
+  );
+}
