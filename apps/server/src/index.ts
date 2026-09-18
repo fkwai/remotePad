@@ -11,6 +11,8 @@ import { registerSearchRoutes } from './routes/search.ts';
 import { registerGitRoutes } from './routes/git.ts';
 import { registerMachineRoutes } from './routes/machine.ts';
 import { registerFavoriteRoutes } from './routes/favorites.ts';
+import { registerWorkspaceRoutes } from './routes/workspaces.ts';
+import { registerSessionRoutes } from './routes/session.ts';
 import { registerTermSocket } from './terminal/ws.ts';
 import { registerWatchSocket } from './watch.ts';
 
@@ -28,6 +30,8 @@ app.setErrorHandler((err, _req, reply) => {
 await registerMachineRoutes(app);
 await registerFsRoutes(app);
 await registerFavoriteRoutes(app);
+await registerWorkspaceRoutes(app);
+await registerSessionRoutes(app);
 await registerSearchRoutes(app);
 await registerGitRoutes(app);
 await registerTermSocket(app);

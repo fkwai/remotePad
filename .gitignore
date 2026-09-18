@@ -9,4 +9,5 @@ dist
 coverage
 *.tsbuildinfo
 .remotepad
+tmp
 samples/gitdemo/.git

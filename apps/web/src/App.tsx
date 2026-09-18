@@ -1,15 +1,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Panel, PanelGroup, PanelResizeHandle } from 'react-resizable-panels';
-import type { Favorite, FsEntry, FsListResponse, FsReadResponse, GitDiffResponse, GitStatusResponse, MachineInfo, TermClientMessage, TermServerMessage, TermSessionInfo, WatchServerMessage } from '@remotepad/shared';
+import type { Favorite, FsEntry, FsListResponse, FsReadResponse, GitDiffResponse, GitStatusResponse, MachineInfo, SessionState, TermClientMessage, TermServerMessage, TermSessionInfo, WatchServerMessage, Workspace, WorkspacesResponse } from '@remotepad/shared';
 import { api } from './api';
 import { basename, dirname, hasRenderedView, viewerKind } from './files';
-import { FileTree } from './components/FileTree';
+import { LeftSidebar, type SideTab } from './components/LeftSidebar';
 import { EditorArea, type OpenTab } from './components/EditorArea';
 import { TerminalPanel } from './components/TerminalPanel';
 import { InfoPanel } from './components/InfoPanel';
+import { TextClipMenu } from './components/ContextMenu';
 
 export function App() {
-  const [roots, setRoots] = useState<string[]>(['/']);
   const [treeRoot, setTreeRoot] = useState('/');
   const [machine, setMachine] = useState<MachineInfo | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
@@ -23,6 +23,11 @@ export function App() {
   const [toast, setToast] = useState<string | null>(null);
   const [termOpen, setTermOpen] = useState(true);
   const [favorites, setFavorites] = useState<Favorite[]>([]);
+  const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
+  const [controlPath, setControlPath] = useState<string | null>(null);
+  const [workspacePath, setWorkspacePath] = useState<string | null>(null);
+  const [sideTab, setSideTab] = useState<SideTab>('favorites');
+  const [clipMenu, setClipMenu] = useState<{ x: number; y: number; text: string } | null>(null);
 
   const termWs = useRef<WebSocket | null>(null);
   const watchWs = useRef<WebSocket | null>(null);
@@ -41,7 +46,23 @@ export function App() {
   sessionsRef.current = sessions;
   const treeRootRef = useRef(treeRoot);
   treeRootRef.current = treeRoot;
-  const pendingRun = useRef<string | null>(null);
+  const pendingRun = useRef<{ setup: string; text: string } | null>(null);
+  const pendingAfterStartup = useRef<{ id: string; text: string } | null>(null);
+  const workspacesRef = useRef(workspaces);
+  workspacesRef.current = workspaces;
+  const selectedRef = useRef(selected);
+  selectedRef.current = selected;
+  const controlPathRef = useRef(controlPath);
+  controlPathRef.current = controlPath;
+  const workspacePathRef = useRef(workspacePath);
+  workspacePathRef.current = workspacePath;
+  const expandedRef = useRef(expanded);
+  expandedRef.current = expanded;
+  const sideTabRef = useRef(sideTab);
+  sideTabRef.current = sideTab;
+  const termOpenRef = useRef(termOpen);
+  termOpenRef.current = termOpen;
+  const sessionReady = useRef(false);
 
   const showToast = (msg: string) => {
     setToast(msg);
@@ -54,6 +75,23 @@ export function App() {
     watchPath(dir);
   }, []);
 
+  const restoreTabs = useCallback(async (items: SessionState['tabs'], active: string | null) => {
+    const files = items.filter((item) => !item.folder);
+    const folders = items.filter((item) => item.folder);
+    const folder = folders.find((item) => item.path === active) || folders[folders.length - 1];
+    const ordered = folder ? [...files, folder] : files;
+    const loaded: OpenTab[] = [];
+    for (const item of ordered) {
+      const tab = await readTab(item.path, item.viewMode, item.folder);
+      if (tab) loaded.push(tab);
+    }
+    setTabs(loaded);
+    const next = active && loaded.some((tab) => tab.path === active)
+      ? active
+      : loaded[loaded.length - 1]?.path || null;
+    setActivePath(next);
+  }, []);
+
   function watchPath(dir: string) {
     if (watched.current.has(dir)) return;
     watched.current.add(dir);
@@ -61,17 +99,107 @@ export function App() {
   }
 
   useEffect(() => {
-    api<{ roots: string[] }>('/api/fs/roots').then((res) => {
-      setRoots(res.roots);
-      const first = res.roots[0] || '/';
-      setTreeRoot(first);
-      setSelected(first);
-      setExpanded(new Set([first]));
-      void loadDir(first);
-    }).catch((err) => showToast(String(err.message || err)));
+    let cancelled = false;
+    sessionReady.current = false;
     api<MachineInfo>('/api/machine').then(setMachine).catch(() => undefined);
-    api<{ folders: Favorite[] }>('/api/favorites').then((res) => setFavorites(res.folders)).catch(() => undefined);
-  }, [loadDir]);
+    (async () => {
+      try {
+        const [favs, ws, session] = await Promise.all([
+          api<{ folders: Favorite[] }>('/api/favorites').catch(() => ({ folders: [] as Favorite[] })),
+          api<WorkspacesResponse>('/api/workspaces').catch(() => ({ folders: [] as Workspace[], controlPath: '' })),
+          api<SessionState>('/api/session').catch(() => null),
+        ]);
+        if (cancelled) return;
+        setFavorites(favs.folders);
+        setWorkspaces(ws.folders);
+        if (ws.controlPath) setControlPath(ws.controlPath);
+        const tree = session?.treeRoot || '/';
+        const wsPath = session?.workspacePath && ws.folders.some((item) => item.path === session.workspacePath)
+          ? session.workspacePath
+          : null;
+        setWorkspacePath(wsPath);
+        setTreeRoot(tree);
+        setSelected(session?.selected || tree);
+        setSideTab(session?.sideTab === 'workspace' ? 'workspace' : 'favorites');
+        setTermOpen(true);
+        const expandedDirs = session?.expanded?.length ? session.expanded : [tree];
+        setExpanded(new Set(expandedDirs));
+        await loadDir(tree);
+        for (const dir of expandedDirs) await loadDir(dir);
+        if (session?.tabs?.length) await restoreTabs(session.tabs, session.activePath);
+      } catch (err) {
+        if (!cancelled) showToast(String(err instanceof Error ? err.message : err));
+        setTreeRoot('/');
+        setSelected('/');
+        setExpanded(new Set(['/']));
+        void loadDir('/');
+      } finally {
+        if (!cancelled) sessionReady.current = true;
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [loadDir, restoreTabs]);
+
+  const sessionSig = useMemo(() => JSON.stringify({
+    workspacePath,
+    treeRoot,
+    selected,
+    expanded: [...expanded].sort(),
+    tabs: tabs
+      .filter((tab) => tab.kind !== 'diff')
+      .map((tab) => ({ path: tab.path, viewMode: tab.viewMode, folder: tab.kind === 'folder' })),
+    activePath,
+    sideTab,
+  }), [workspacePath, treeRoot, selected, expanded, tabs, activePath, sideTab]);
+
+  const putSession = (keepalive = false) => {
+    const body = JSON.stringify({
+      workspacePath: workspacePathRef.current,
+      treeRoot: treeRootRef.current,
+      selected: selectedRef.current,
+      expanded: [...expandedRef.current],
+      tabs: tabsRef.current
+        .filter((tab) => tab.kind !== 'diff')
+        .map((tab) => ({ path: tab.path, viewMode: tab.viewMode, folder: tab.kind === 'folder' })),
+      activePath: activePathRef.current,
+      sideTab: sideTabRef.current,
+      termOpen: termOpenRef.current,
+    } satisfies SessionState);
+    if (keepalive) {
+      void fetch('/api/session', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body,
+        keepalive: true,
+      }).catch(() => undefined);
+      return;
+    }
+    void api('/api/session', { method: 'PUT', body }).catch(() => undefined);
+  };
+
+  useEffect(() => {
+    if (!sessionReady.current) return;
+    const handle = window.setTimeout(() => putSession(false), 0);
+    return () => window.clearTimeout(handle);
+  }, [sessionSig]);
+
+  useEffect(() => {
+    const flush = () => {
+      if (!sessionReady.current) return;
+      putSession(true);
+    };
+    const onHidden = () => {
+      if (document.visibilityState === 'hidden') flush();
+    };
+    window.addEventListener('pagehide', flush);
+    window.addEventListener('beforeunload', flush);
+    document.addEventListener('visibilitychange', onHidden);
+    return () => {
+      window.removeEventListener('pagehide', flush);
+      window.removeEventListener('beforeunload', flush);
+      document.removeEventListener('visibilitychange', onHidden);
+    };
+  }, []);
 
   useEffect(() => {
     let closed = false;
@@ -117,21 +245,37 @@ export function App() {
       ws.onmessage = (ev) => {
         const msg = JSON.parse(String(ev.data)) as TermServerMessage;
         if (msg.type === 'list') {
-          setSessions(msg.sessions);
-          const ids = msg.sessions.map((item) => item.id);
-          const remembered = pendingAttach.current.length ? pendingAttach.current : ids;
-          for (const id of remembered) {
-            if (ids.includes(id)) sendTerm({ type: 'attach', id });
+          const mine = pendingAttach.current;
+          if (!mine.length) {
+            setSessions([]);
+            setActiveTerm(null);
+            return;
           }
-          setActiveTerm((cur) => cur || ids[0] || null);
+          const live = msg.sessions.filter((item) => mine.includes(item.id));
+          setSessions(live);
+          for (const item of live) sendTerm({ type: 'attach', id: item.id });
+          setActiveTerm((cur) => (cur && live.some((item) => item.id === cur) ? cur : live[0]?.id || null));
         } else if (msg.type === 'created' || msg.type === 'renamed') {
           setSessions((prev) => upsertSession(prev, msg.session));
           if (msg.type === 'created') {
             setActiveTerm(msg.session.id);
             const pending = pendingRun.current;
-            if (pending) {
-              pendingRun.current = null;
-              sendTerm({ type: 'input', id: msg.session.id, data: pending });
+            pendingRun.current = null;
+            if (pending?.setup) {
+              const id = msg.session.id;
+              window.setTimeout(() => sendTerm({ type: 'input', id, data: pending.setup }), 200);
+              if (pending.text) {
+                pendingAfterStartup.current = { id, text: pending.text };
+                window.setTimeout(() => {
+                  const wait = pendingAfterStartup.current;
+                  if (wait && wait.id === id) {
+                    pendingAfterStartup.current = null;
+                    sendTerm({ type: 'input', id, data: wait.text });
+                  }
+                }, 2500);
+              }
+            } else if (pending?.text) {
+              sendTerm({ type: 'input', id: msg.session.id, data: pending.text });
             }
           }
         } else if (msg.type === 'attached') {
@@ -140,6 +284,11 @@ export function App() {
           setActiveTerm((cur) => cur || msg.session.id);
         } else if (msg.type === 'data') {
           termWrite.current(msg.id, msg.data);
+          const wait = pendingAfterStartup.current;
+          if (wait && wait.id === msg.id && msg.data.includes('>>>')) {
+            pendingAfterStartup.current = null;
+            sendTerm({ type: 'input', id: wait.id, data: wait.text });
+          }
         } else if (msg.type === 'exit') {
           setSessions((prev) => prev.map((item) => item.id === msg.id ? { ...item, alive: false } : item));
         } else if (msg.type === 'closed') {
@@ -194,12 +343,16 @@ export function App() {
     await loadDir(dir);
   };
 
-  const resetTreeRoot = async () => {
-    const first = roots[0] || '/';
-    setTreeRoot(first);
-    setSelected(first);
-    setExpanded(new Set([first]));
-    await loadDir(first);
+  const goUp = async () => {
+    const cur = treeRootRef.current;
+    if (cur === '/') return;
+    const parent = dirname(cur) || '/';
+    await revealDir(parent);
+  };
+
+  const clearWorkspace = async () => {
+    setWorkspacePath(null);
+    await revealDir('/');
   };
 
   const pinFolder = async (dir: string) => {
@@ -225,8 +378,42 @@ export function App() {
     }
   };
 
+  const addWorkspace = async (dir: string) => {
+    try {
+      const res = await api<WorkspacesResponse>('/api/workspaces', {
+        method: 'POST',
+        body: JSON.stringify({ path: dir }),
+      });
+      setWorkspaces(res.folders);
+      setControlPath(res.controlPath);
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : String(err));
+    }
+  };
+
+  const removeWorkspace = async (dir: string) => {
+    try {
+      const res = await api<WorkspacesResponse>(`/api/workspaces?path=${encodeURIComponent(dir)}`, {
+        method: 'DELETE',
+      });
+      setWorkspaces(res.folders);
+      setControlPath(res.controlPath);
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : String(err));
+    }
+  };
+
+  const reloadWorkspaces = async () => {
+    try {
+      const res = await api<WorkspacesResponse>('/api/workspaces');
+      setWorkspaces(res.folders);
+      setControlPath(res.controlPath);
+    } catch {
+      // ignore
+    }
+  };
+
   const openFile = async (entry: FsEntry) => {
-    setSelected(entry.path);
     if (entry.kind === 'dir') {
       await toggleDir(entry.path);
       return;
@@ -272,11 +459,43 @@ export function App() {
     }
   };
 
+  const openFolder = async (dir: string, viewMode?: OpenTab['viewMode']) => {
+    await loadDir(dir);
+    const existing = tabsRef.current.find((tab) => tab.kind === 'folder');
+    const mode = viewMode === 'details' || viewMode === 'icons'
+      ? viewMode
+      : (existing?.viewMode === 'details' ? 'details' : 'icons');
+    if (existing) {
+      setTabs((prev) => prev.map((tab) => tab.kind === 'folder'
+        ? { ...tab, path: dir, name: 'Explorer', viewMode: mode }
+        : tab));
+      setActivePath(dir);
+      return;
+    }
+    setTabs((prev) => [...prev, {
+      path: dir,
+      name: 'Explorer',
+      content: '',
+      savedContent: '',
+      binary: false,
+      viewMode: mode,
+      dirty: false,
+      loading: false,
+      kind: 'folder',
+    }]);
+    setActivePath(dir);
+  };
+
+  const navigateFolder = (_from: string, to: string) => {
+    void openFolder(to);
+  };
+
   const save = async (path: string) => {
     const tab = tabsRef.current.find((item) => item.path === path);
-    if (!tab || tab.binary || tab.kind === 'diff') return;
+    if (!tab || tab.binary || tab.kind === 'diff' || tab.kind === 'folder') return;
     await api('/api/fs/write', { method: 'PUT', body: JSON.stringify({ path, content: tab.content }) });
     setTabs((prev) => prev.map((item) => item.path === path ? { ...item, savedContent: item.content, dirty: false } : item));
+    if (controlPathRef.current && path === controlPathRef.current) void reloadWorkspaces();
   };
 
   useEffect(() => {
@@ -294,6 +513,22 @@ export function App() {
     return () => window.removeEventListener('keydown', onKey);
   }, []);
 
+  useEffect(() => {
+    const own = '.tree-body, .side-list, .folder-view, .folder-table, .folder-icons, .menu, .xterm, .xterm-screen';
+    const onMenu = (e: MouseEvent) => {
+      const node = e.target as HTMLElement | null;
+      if (node?.closest(own)) {
+        setClipMenu(null);
+        return;
+      }
+      const text = window.getSelection()?.toString() ?? '';
+      if (text) setClipMenu({ x: e.clientX, y: e.clientY, text });
+      else setClipMenu(null);
+    };
+    document.addEventListener('contextmenu', onMenu, true);
+    return () => document.removeEventListener('contextmenu', onMenu, true);
+  }, []);
+
   const runInTerminal = (text: string) => {
     if (!text) return;
     setTermOpen(true);
@@ -303,8 +538,58 @@ export function App() {
       sendTerm({ type: 'input', id, data: text });
       return;
     }
-    pendingRun.current = text;
-    sendTerm({ type: 'create', cwd: treeRootRef.current });
+    const hint = activePathRef.current || selectedRef.current || treeRootRef.current;
+    const ws = matchWorkspace(hint, workspacesRef.current);
+    pendingRun.current = { setup: startupText(ws), text };
+    sendTerm({ type: 'create', cwd: ws?.path || treeRootRef.current, name: ws?.name });
+  };
+
+  const runStartup = (ws: Workspace) => {
+    const text = startupText(ws);
+    if (!text) {
+      showToast('No startup commands in the control file');
+      return;
+    }
+    setTermOpen(true);
+    const id = activeTermRef.current;
+    const alive = id && sessionsRef.current.some((item) => item.id === id && item.alive);
+    if (id && alive) {
+      sendTerm({ type: 'input', id, data: text });
+      return;
+    }
+    pendingRun.current = { setup: text, text: '' };
+    sendTerm({ type: 'create', cwd: ws.path, name: ws.name });
+  };
+
+  const revealInTree = async (filePath: string) => {
+    if (!filePath || filePath.startsWith('diff:')) return;
+    const folders = workspacesRef.current;
+    const currentRoot = treeRootRef.current;
+    const currentWs = folders.find((item) => item.path === workspacePathRef.current) || null;
+    const containing = matchWorkspace(filePath, folders);
+    const isFolder = tabsRef.current.some((tab) => tab.path === filePath && tab.kind === 'folder')
+      || Boolean(listingsRef.current[filePath]);
+    let root = currentRoot;
+    if (filePath === currentRoot || filePath.startsWith(currentRoot + '/') || currentRoot === '/') {
+      root = currentRoot;
+    } else if (currentWs && (filePath === currentWs.path || filePath.startsWith(currentWs.path + '/'))) {
+      root = currentWs.path;
+    } else if (containing) {
+      root = containing.path;
+      setWorkspacePath(containing.path);
+      setSideTab('workspace');
+    } else {
+      root = isFolder ? filePath : (dirname(filePath) || '/');
+    }
+    if (root !== currentRoot) {
+      setTreeRoot(root);
+      await loadDir(root);
+    }
+    const dirs = dirsToExpand(filePath, root);
+    if (isFolder && !dirs.includes(filePath)) dirs.push(filePath);
+    for (const dir of dirs) await loadDir(dir);
+    setExpanded(new Set(dirs));
+    setSelected(filePath);
   };
 
   const createNode = async (dir: string, kind: 'file' | 'dir', name: string) => {
@@ -339,7 +624,12 @@ export function App() {
 
   const openTerminalHere = (dir: string) => {
     setTermOpen(true);
-    sendTerm({ type: 'create', cwd: dir, name: basename(dir) });
+    const ws = workspacesRef.current.find((item) => item.path === dir);
+    sendTerm({ type: 'create', cwd: dir, name: ws?.name || basename(dir) });
+  };
+
+  const createDefaultTerminal = () => {
+    openTerminalHere(workspacePathRef.current || treeRootRef.current);
   };
 
   const openDiff = async (path: string) => {
@@ -362,12 +652,19 @@ export function App() {
   };
 
   const currentPath = useMemo(() => activePath || selected, [activePath, selected]);
+  const activeWorkspace = useMemo(
+    () => workspaces.find((item) => item.path === workspacePath) || null,
+    [workspacePath, workspaces],
+  );
 
   return (
-    <div className="app" onContextMenu={(e) => e.preventDefault()}>
+    <div className="app">
       <header className="topbar">
         <div className="brand"><span className="brand-mark" /> RemotePad</div>
-        <div className="path">{currentPath}</div>
+        <div className="path">
+          {activeWorkspace && <span className="ws-chip">{activeWorkspace.name}</span>}
+          <span>{currentPath}</span>
+        </div>
         <div className="spacer" />
         {machine && <div className="path">{machine.user}@{machine.hostname}</div>}
         <button
@@ -379,25 +676,44 @@ export function App() {
       </header>
       <div className="shell">
         <PanelGroup direction="horizontal">
-          <Panel defaultSize={20} minSize={12}>
-            <FileTree
+          <Panel defaultSize={24} minSize={14}>
+            <LeftSidebar
               roots={[treeRoot]}
               treeRoot={treeRoot}
               selected={selected}
               expanded={expanded}
               listings={listings}
               favorites={favorites}
+              workspaces={workspaces}
+              workspacePath={workspacePath}
+              sideTab={sideTab}
+              onSideTab={setSideTab}
               onSelect={(path) => setSelected(path)}
               onToggle={(path) => void toggleDir(path)}
               onOpen={(entry) => void openFile(entry)}
+              onBrowse={(entry) => void openFolder(entry.path)}
               onCreate={(dir, kind, name) => void createNode(dir, kind, name)}
               onRename={(from, name) => void renameNode(from, name)}
               onDelete={(entry) => void deleteNode(entry)}
               onTerminal={openTerminalHere}
               onPin={(path) => void pinFolder(path)}
               onUnpin={(path) => void unpinFolder(path)}
-              onFavorite={(path) => void revealDir(path)}
-              onResetRoot={() => void resetTreeRoot()}
+              onAddWorkspace={(path) => void addWorkspace(path)}
+              onRemoveWorkspace={(path) => void removeWorkspace(path)}
+              onReveal={(path, asWorkspace) => {
+                if (asWorkspace) {
+                  setWorkspacePath(path);
+                  setSideTab('workspace');
+                }
+                void revealDir(path);
+              }}
+              onClearWorkspace={() => void clearWorkspace()}
+              onGoUp={() => void goUp()}
+              onOpenControl={() => {
+                if (!controlPath) return;
+                void openFile({ name: basename(controlPath), path: controlPath, kind: 'file' });
+              }}
+              onRunStartup={runStartup}
             />
           </Panel>
           <PanelResizeHandle className="resize-handle" />
@@ -428,9 +744,24 @@ export function App() {
                       }}
                       onSave={(path) => void save(path)}
                       onRunInTerminal={runInTerminal}
+                      onRevealInTree={(path) => void revealInTree(path)}
                       onToggleView={(path, mode) => {
                         setTabs((prev) => prev.map((tab) => tab.path === path ? { ...tab, viewMode: mode } : tab));
                       }}
+                      listings={listings}
+                      favorites={favorites}
+                      workspaces={workspaces}
+                      onOpenFile={(entry) => void openFile(entry)}
+                      onOpenFolder={navigateFolder}
+                      onCreate={(dir, kind, name) => void createNode(dir, kind, name)}
+                      onRename={(from, name) => void renameNode(from, name)}
+                      onDelete={(entry) => void deleteNode(entry)}
+                      onTerminal={openTerminalHere}
+                      onPin={(path) => void pinFolder(path)}
+                      onUnpin={(path) => void unpinFolder(path)}
+                      onAddWorkspace={(path) => void addWorkspace(path)}
+                      onRemoveWorkspace={(path) => void removeWorkspace(path)}
+                      onLoadDir={loadDir}
                     />
                   </Panel>
                   <PanelResizeHandle className="resize-handle" />
@@ -457,7 +788,7 @@ export function App() {
                       sessions={sessions}
                       activeId={activeTerm}
                       onSelect={setActiveTerm}
-                      onCreate={() => sendTerm({ type: 'create', cwd: selected && listings[selected] ? selected : selected ? dirname(selected) : treeRoot })}
+                      onCreate={createDefaultTerminal}
                       onRename={(id, name) => sendTerm({ type: 'rename', id, name })}
                       onClose={(id) => sendTerm({ type: 'close', id })}
                       onInput={(id, data) => sendTerm({ type: 'input', id, data })}
@@ -477,6 +808,14 @@ export function App() {
         </button>
       )}
       {toast && <div className="toast">{toast}</div>}
+      {clipMenu && (
+        <TextClipMenu
+          x={clipMenu.x}
+          y={clipMenu.y}
+          text={clipMenu.text}
+          onClose={() => setClipMenu(null)}
+        />
+      )}
     </div>
   );
 }
@@ -487,4 +826,79 @@ function upsertSession(list: TermSessionInfo[], session: TermSessionInfo): TermS
   const next = list.slice();
   next[i] = session;
   return next;
+}
+
+function matchWorkspace(path: string, folders: Workspace[]): Workspace | null {
+  let best: Workspace | null = null;
+  for (const item of folders) {
+    if (path === item.path || path.startsWith(item.path + '/')) {
+      if (!best || item.path.length > best.path.length) best = item;
+    }
+  }
+  return best;
+}
+
+function startupText(ws: Workspace | null): string {
+  if (!ws?.startup?.length) return '';
+  return ws.startup.map((line) => line.endsWith('\n') ? line : `${line}\n`).join('');
+}
+
+function dirsToExpand(filePath: string, root: string): string[] {
+  const out: string[] = [];
+  let cur = filePath;
+  while (true) {
+    const dir = dirname(cur);
+    if (!dir || dir === cur) {
+      if (root === '/' && !out.includes('/')) out.unshift('/');
+      break;
+    }
+    out.unshift(dir);
+    if (dir === root) break;
+    cur = dir;
+  }
+  if (!out.includes(root)) out.unshift(root);
+  return out;
+}
+
+async function readTab(filePath: string, viewMode?: OpenTab['viewMode'], folder?: boolean): Promise<OpenTab | null> {
+  if (!filePath || filePath.startsWith('diff:')) return null;
+  if (folder) {
+    return {
+      path: filePath,
+      name: 'Explorer',
+      content: '',
+      savedContent: '',
+      binary: false,
+      viewMode: viewMode === 'details' ? 'details' : 'icons',
+      dirty: false,
+      loading: false,
+      kind: 'folder',
+    };
+  }
+  const kind = viewerKind(filePath);
+  const tab: OpenTab = {
+    path: filePath,
+    name: basename(filePath),
+    content: '',
+    savedContent: '',
+    binary: false,
+    viewMode: viewMode === 'source' || viewMode === 'rendered'
+      ? viewMode
+      : (hasRenderedView(kind) ? 'rendered' : 'source'),
+    dirty: false,
+    loading: false,
+    kind,
+  };
+  try {
+    if (kind === 'image') return { ...tab, binary: true };
+    const file = await api<FsReadResponse>(`/api/fs/read?path=${encodeURIComponent(filePath)}`);
+    return {
+      ...tab,
+      content: file.binary ? '' : file.content,
+      savedContent: file.binary ? '' : file.content,
+      binary: file.binary,
+    };
+  } catch {
+    return null;
+  }
 }

@@ -1,4 +1,4 @@
-export type ViewerKind = 'markdown' | 'json' | 'jsonl' | 'csv' | 'image' | 'html' | 'log' | 'code' | 'diff';
+export type ViewerKind = 'markdown' | 'json' | 'jsonl' | 'csv' | 'image' | 'html' | 'log' | 'code' | 'diff' | 'folder';
 
 const IMAGE = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'bmp', 'ico']);
 
@@ -21,7 +21,7 @@ export function viewerKind(filePath: string): ViewerKind {
 }
 
 export function hasRenderedView(kind: ViewerKind): boolean {
-  return kind !== 'code' && kind !== 'diff';
+  return kind !== 'code' && kind !== 'diff' && kind !== 'folder';
 }
 
 export function monacoLanguage(filePath: string): string {
@@ -74,6 +74,16 @@ export function monacoLanguage(filePath: string): string {
   if (base === 'dockerfile') return 'dockerfile';
   if (base === 'makefile') return 'makefile';
   return map[ext] || 'plaintext';
+}
+
+export function fileMark(filePath: string): { text: string; cls: string } {
+  const ext = extOf(filePath);
+  if (ext === 'py') return { text: 'py', cls: 'mk-py' };
+  if (ext === 'ts' || ext === 'tsx') return { text: 'ts', cls: 'mk-ts' };
+  if (ext === 'js' || ext === 'jsx' || ext === 'mjs' || ext === 'cjs') return { text: 'js', cls: 'mk-js' };
+  if (ext === 'md' || ext === 'markdown') return { text: 'md', cls: 'mk-md' };
+  if (ext === 'json' || ext === 'jsonl' || ext === 'ndjson') return { text: '{}', cls: 'mk-json' };
+  return { text: '▤', cls: 'mk-file' };
 }
 
 export function basename(filePath: string): string {

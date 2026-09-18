@@ -55,7 +55,7 @@ export function TerminalPanel({
       host.appendChild(el);
       const term = new Terminal({
         fontSize: 13,
-        fontFamily: 'JetBrains Mono, SF Mono, ui-monospace, monospace',
+        fontFamily: 'ui-monospace, Menlo, Monaco, Consolas, Courier New, monospace',
         theme: {
           background: '#0b0c0f',
           foreground: '#e8eaef',
@@ -70,7 +70,41 @@ export function TerminalPanel({
       term.loadAddon(fit);
       term.loadAddon(new WebLinksAddon());
       term.open(el);
-      el.addEventListener('contextmenu', (e) => e.preventDefault());
+      term.attachCustomKeyEventHandler((ev) => {
+        if (ev.type !== 'keydown') return true;
+        const mod = ev.ctrlKey || ev.metaKey;
+        const key = ev.key.toLowerCase();
+        if (mod && key === 'c' && term.hasSelection()) {
+          void writeClipboard(term.getSelection());
+          return false;
+        }
+        if (mod && ev.shiftKey && key === 'c') {
+          void writeClipboard(term.getSelection());
+          return false;
+        }
+        if (key === 'insert' && mod && !ev.shiftKey && term.hasSelection()) {
+          void writeClipboard(term.getSelection());
+          return false;
+        }
+        if ((mod && key === 'v') || (ev.shiftKey && key === 'insert')) {
+          void readClipboard().then((text) => {
+            if (text) onInputRef.current(session.id, text);
+          });
+          return false;
+        }
+        return true;
+      });
+      el.addEventListener('contextmenu', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        if (term.hasSelection()) {
+          void writeClipboard(term.getSelection());
+          return;
+        }
+        void readClipboard().then((text) => {
+          if (text) onInputRef.current(session.id, text);
+        });
+      });
       term.onData((data) => onInputRef.current(session.id, data));
       terms.current.set(session.id, { term, fit, el });
     }
@@ -150,8 +184,33 @@ export function TerminalPanel({
           </div>
         ))}
         <button className="ghost" onClick={onCreate}>+ Terminal</button>
+        <span className="hint">select then Ctrl+C or right-click to copy</span>
       </div>
       <div className="term-body" ref={hostRef} />
     </div>
   );
+}
+
+async function writeClipboard(text: string) {
+  if (!text) return;
+  try {
+    await navigator.clipboard.writeText(text);
+  } catch {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.position = 'fixed';
+    ta.style.left = '-9999px';
+    document.body.appendChild(ta);
+    ta.select();
+    document.execCommand('copy');
+    ta.remove();
+  }
+}
+
+async function readClipboard(): Promise<string> {
+  try {
+    return await navigator.clipboard.readText();
+  } catch {
+    return '';
+  }
 }

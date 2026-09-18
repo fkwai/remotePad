@@ -45,6 +45,34 @@ export interface FavoritesResponse {
   folders: Favorite[];
 }
 
+export interface Workspace {
+  path: string;
+  name: string;
+  startup?: string[];
+}
+
+export interface WorkspacesResponse {
+  folders: Workspace[];
+  controlPath: string;
+}
+
+export interface SessionTab {
+  path: string;
+  viewMode: 'rendered' | 'source' | 'icons' | 'details';
+  folder?: boolean;
+}
+
+export interface SessionState {
+  workspacePath: string | null;
+  treeRoot: string;
+  selected: string | null;
+  expanded: string[];
+  tabs: SessionTab[];
+  activePath: string | null;
+  sideTab: 'favorites' | 'workspace';
+  termOpen: boolean;
+}
+
 export interface SearchHit {
   path: string;
   name: string;

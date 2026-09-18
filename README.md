@@ -68,11 +68,31 @@ The file tree starts at `/`. Allowed paths include `/` plus `$HOME`, the process
 
 - `Ctrl/Cmd+S` save the active file
 - `Ctrl+`` toggle the terminal panel
+- Terminal: select text, then `Ctrl/Cmd+C` or right-click to copy; `Ctrl/Cmd+V` or right-click empty to paste. `Ctrl+C` still interrupts when nothing is selected.
 - Double-click a terminal tab to rename it
-- Right-click the file tree for create / rename / delete / pin favorite / Open terminal here
-- Click ★ on a folder to pin it; favorites sit at the top of the file tree
+- Right-click the file tree for create / rename / delete / pin favorite / add to workspace / Open terminal here
+- Double-click a file tab to reveal it in the tree (switches workspace if the file belongs to another one)
+- Drag the handle between the favorites/workspace list and the file tree to resize them
+- Click `...` at the top of the file tree to go up one folder
 
-Favorites are stored on the machine in `~/.remotepad/favorites.json`. Home is pinned by default.
+Favorites are stored in `~/.remotepad/favorites.json`. Home is pinned by default.
+
+Workspaces are listed in one control file: `~/.remotepad/workspaces.json`. Each entry can include `startup`, an array of shell lines sent when you right-click the workspace and choose **Run startup**. Click **none** to clear the active workspace. Session UI state (open files, tree, workspace, sidebar tab) is stored in `tmp/session.json` in this repo and restored on startup.
+
+```json
+{
+  "folders": [
+    {
+      "path": "/workspace/opticsimulation",
+      "name": "opticsimulation",
+      "startup": [
+        "source /workspace/env/optic/bin/activate",
+        "/workspace/env/optic/bin/python"
+      ]
+    }
+  ]
+}
+```
 
 ## Viewers
 

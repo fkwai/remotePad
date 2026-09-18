@@ -9,7 +9,8 @@ import { CsvView } from './viewers/CsvView';
 import { ImageView } from './viewers/ImageView';
 import { HtmlView } from './viewers/HtmlView';
 import { LogView } from './viewers/LogView';
-import { DiffView } from './viewers/DiffView';
+import { FolderView } from './FolderView';
+import type { Favorite, FsEntry, Workspace } from '@remotepad/shared';
 
 export interface OpenTab {
   path: string;
@@ -17,7 +18,7 @@ export interface OpenTab {
   content: string;
   savedContent: string;
   binary: boolean;
-  viewMode: 'rendered' | 'source';
+  viewMode: 'rendered' | 'source' | 'icons' | 'details';
   dirty: boolean;
   loading: boolean;
   error?: string;
@@ -34,6 +35,21 @@ export function EditorArea({
   onSave,
   onToggleView,
   onRunInTerminal,
+  onRevealInTree,
+  listings,
+  favorites,
+  workspaces,
+  onOpenFile,
+  onOpenFolder,
+  onCreate,
+  onRename,
+  onDelete,
+  onTerminal,
+  onPin,
+  onUnpin,
+  onAddWorkspace,
+  onRemoveWorkspace,
+  onLoadDir,
 }: {
   tabs: OpenTab[];
   activePath: string | null;
@@ -41,8 +57,23 @@ export function EditorArea({
   onClose: (path: string) => void;
   onChange: (path: string, content: string) => void;
   onSave: (path: string) => void;
-  onToggleView: (path: string, mode: 'rendered' | 'source') => void;
+  onToggleView: (path: string, mode: OpenTab['viewMode']) => void;
   onRunInTerminal: (text: string) => void;
+  onRevealInTree: (path: string) => void;
+  listings: Record<string, FsEntry[]>;
+  favorites: Favorite[];
+  workspaces: Workspace[];
+  onOpenFile: (entry: FsEntry) => void;
+  onOpenFolder: (from: string, to: string) => void;
+  onCreate: (dir: string, kind: 'file' | 'dir', name: string) => void;
+  onRename: (from: string, name: string) => void;
+  onDelete: (entry: FsEntry) => void;
+  onTerminal: (dir: string) => void;
+  onPin: (path: string) => void;
+  onUnpin: (path: string) => void;
+  onAddWorkspace: (path: string) => void;
+  onRemoveWorkspace: (path: string) => void;
+  onLoadDir: (dir: string) => void;
 }) {
   const tab = tabs.find((item) => item.path === activePath) || null;
   return (
@@ -50,27 +81,40 @@ export function EditorArea({
       <div className="tabs">
         {tabs.map((item) => (
           <div
-            key={item.path}
+            key={item.kind === 'folder' ? 'explorer' : item.path}
             className={`tab ${item.path === activePath ? 'active' : ''}`}
             onClick={() => onSelect(item.path)}
+            onDoubleClick={() => onRevealInTree(item.path)}
           >
             <span className={item.dirty ? 'dirty' : ''}>{item.dirty ? '● ' : ''}{item.name}</span>
-            <button className="ghost close" onClick={(e) => { e.stopPropagation(); onClose(item.path); }}>×</button>
+            <button className="ghost close" onClick={(e) => { e.stopPropagation(); onClose(item.path); }} onDoubleClick={(e) => e.stopPropagation()}>×</button>
           </div>
         ))}
       </div>
-      {tab && (
+      {tab && (tab.kind === 'folder' || hasRenderedView(tab.kind) || (!tab.binary && tab.kind !== 'diff')) && (
         <div className="editor-toolbar">
+          {tab.kind === 'folder' && (
+            <>
+              <div className="seg">
+                <button className={tab.viewMode === 'icons' ? 'active' : ''} onClick={() => onToggleView(tab.path, 'icons')}>Icons</button>
+                <button className={tab.viewMode === 'details' ? 'active' : ''} onClick={() => onToggleView(tab.path, 'details')}>Details</button>
+              </div>
+              {tab.path !== '/' && (
+                <button className="ghost" onClick={() => onOpenFolder(tab.path, parentOf(tab.path))}>↑</button>
+              )}
+              <PathCrumbs path={tab.path} onOpen={(dir) => onOpenFolder(tab.path, dir)} />
+              <span className="spacer" />
+              <button className="ghost" onClick={() => onTerminal(tab.path)}>Terminal</button>
+            </>
+          )}
           {hasRenderedView(tab.kind) && (
             <div className="seg">
               <button className={tab.viewMode === 'rendered' ? 'active' : ''} onClick={() => onToggleView(tab.path, 'rendered')}>Rendered</button>
               <button className={tab.viewMode === 'source' ? 'active' : ''} onClick={() => onToggleView(tab.path, 'source')}>Source</button>
             </div>
           )}
-          <span>{tab.path}</span>
-          <span className="spacer" />
-          <span className="hint">Shift+Enter run line</span>
-          {!tab.binary && tab.kind !== 'diff' && (
+          {tab.kind !== 'folder' && <span className="spacer" />}
+          {!tab.binary && tab.kind !== 'diff' && tab.kind !== 'folder' && (
             <button
               className={`primary save-btn ${tab.dirty ? 'dirty' : ''}`}
               disabled={!tab.dirty}
@@ -91,7 +135,29 @@ export function EditorArea({
         {tab?.loading && <div className="empty">Loading…</div>}
         {tab?.error && <div className="empty">{tab.error}</div>}
         {tab && !tab.loading && !tab.error && (
-          tab.viewMode === 'rendered' && hasRenderedView(tab.kind)
+          tab.kind === 'folder'
+            ? (
+              <FolderView
+                dir={tab.path}
+                entries={listings[tab.path]}
+                view={tab.viewMode === 'details' ? 'details' : 'icons'}
+                favorites={favorites}
+                workspaces={workspaces}
+                onOpenFile={onOpenFile}
+                onOpenFolder={(path) => onOpenFolder(tab.path, path)}
+                onReveal={() => onRevealInTree(tab.path)}
+                onCreate={onCreate}
+                onRename={onRename}
+                onDelete={onDelete}
+                onTerminal={onTerminal}
+                onPin={onPin}
+                onUnpin={onUnpin}
+                onAddWorkspace={onAddWorkspace}
+                onRemoveWorkspace={onRemoveWorkspace}
+                onLoad={onLoadDir}
+              />
+            )
+            : tab.viewMode === 'rendered' && hasRenderedView(tab.kind)
             ? <Rendered tab={tab} />
             : tab.kind === 'diff'
               ? <DiffView diff={tab.diff || ''} path={tab.path} />
@@ -111,10 +177,15 @@ export function EditorArea({
                       };
                       editor.addCommand(monaco.KeyMod.Shift | monaco.KeyCode.Enter, run);
                       editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter, run);
+                      const area = editor.getDomNode()?.querySelector('textarea');
+                      if (area) {
+                        area.setAttribute('spellcheck', 'false');
+                        area.setAttribute('autocomplete', 'off');
+                      }
                     }}
                     options={{
                       fontSize: 13,
-                      fontFamily: 'JetBrains Mono, SF Mono, ui-monospace, monospace',
+                      fontFamily: 'ui-monospace, Menlo, Monaco, Consolas, "Courier New", monospace',
                       minimap: { enabled: false },
                       automaticLayout: true,
                       scrollBeyondLastLine: false,
@@ -181,4 +252,27 @@ function textForTerminal(ed: Parameters<OnMount>[0]): string {
   const picked = model.getValueInRange(sel);
   if (picked.length > 0) return picked.endsWith('\n') ? picked : `${picked}\n`;
   return `${model.getLineContent(sel.startLineNumber)}\n`;
+}
+
+function parentOf(filePath: string): string {
+  const i = filePath.lastIndexOf('/');
+  return i <= 0 ? '/' : filePath.slice(0, i);
+}
+
+function PathCrumbs({ path, onOpen }: { path: string; onOpen: (dir: string) => void }) {
+  const parts = path === '/' ? [] : path.split('/').filter(Boolean);
+  return (
+    <span className="folder-path crumbs">
+      <button type="button" className="crumb" title="/" onClick={() => onOpen('/')}>/</button>
+      {parts.map((part, i) => {
+        const dir = '/' + parts.slice(0, i + 1).join('/');
+        return (
+          <span key={dir} className="crumb-seg">
+            {i > 0 && <span className="crumb-sep">/</span>}
+            <button type="button" className="crumb" title={dir} onClick={() => onOpen(dir)}>{part}</button>
+          </span>
+        );
+      })}
+    </span>
+  );
 }

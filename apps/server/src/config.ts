@@ -22,4 +22,5 @@ export const config = {
     ...splitRoots(process.env.REMOTEPAD_ROOTS),
   ].map((item) => path.resolve(item)),
   textSizeLimit: Number(process.env.REMOTEPAD_TEXT_LIMIT || 8 * 1024 * 1024),
+  repoRoot: installRoot,
 };

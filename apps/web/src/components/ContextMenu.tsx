@@ -11,15 +11,18 @@ export function ContextMenu({
   onClose,
   onAction,
   pinned,
+  inWorkspace,
 }: {
   menu: MenuState;
   onClose: () => void;
   onAction: (action: string, entry: FsEntry) => void;
   pinned: boolean;
+  inWorkspace: boolean;
 }) {
   const isDir = menu.entry.kind === 'dir';
   const actions = [
     ...(isDir ? [[pinned ? 'unpin' : 'pin', pinned ? 'Unpin favorite' : 'Pin favorite'] as const] : []),
+    ...(isDir ? [[inWorkspace ? 'ws-remove' : 'ws-add', inWorkspace ? 'Remove from workspace' : 'Add to workspace'] as const] : []),
     ['new-file', 'New file'],
     ['new-dir', 'New folder'],
     ['rename', 'Rename'],
@@ -42,6 +45,32 @@ export function ContextMenu({
               {label}
             </button>
           ))}
+      </div>
+    </>
+  );
+}
+
+export function TextClipMenu({
+  x,
+  y,
+  text,
+  onClose,
+}: {
+  x: number;
+  y: number;
+  text: string;
+  onClose: () => void;
+}) {
+  return (
+    <>
+      <div style={{ position: 'fixed', inset: 0, zIndex: 40 }} onMouseDown={onClose} />
+      <div className="menu" style={{ left: x, top: y }}>
+        <button
+          onClick={() => {
+            void navigator.clipboard.writeText(text);
+            onClose();
+          }}
+        >Copy</button>
       </div>
     </>
   );
