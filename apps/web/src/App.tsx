@@ -32,7 +32,6 @@ export function App() {
   const termWs = useRef<WebSocket | null>(null);
   const watchWs = useRef<WebSocket | null>(null);
   const termWrite = useRef<(id: string, data: string) => void>(() => undefined);
-  const pendingAttach = useRef<string[]>([]);
   const watched = useRef(new Set<string>());
   const listingsRef = useRef(listings);
   listingsRef.current = listings;
@@ -121,7 +120,7 @@ export function App() {
         setTreeRoot(tree);
         setSelected(session?.selected || tree);
         setSideTab(session?.sideTab === 'workspace' ? 'workspace' : 'favorites');
-        setTermOpen(true);
+        setTermOpen(session ? session.termOpen : true);
         const expandedDirs = session?.expanded?.length ? session.expanded : [tree];
         setExpanded(new Set(expandedDirs));
         await loadDir(tree);
@@ -150,7 +149,8 @@ export function App() {
       .map((tab) => ({ path: tab.path, viewMode: tab.viewMode, folder: tab.kind === 'folder' })),
     activePath,
     sideTab,
-  }), [workspacePath, treeRoot, selected, expanded, tabs, activePath, sideTab]);
+    termOpen,
+  }), [workspacePath, treeRoot, selected, expanded, tabs, activePath, sideTab, termOpen]);
 
   const putSession = (keepalive = false) => {
     const body = JSON.stringify({
@@ -245,16 +245,10 @@ export function App() {
       ws.onmessage = (ev) => {
         const msg = JSON.parse(String(ev.data)) as TermServerMessage;
         if (msg.type === 'list') {
-          const mine = pendingAttach.current;
-          if (!mine.length) {
-            setSessions([]);
-            setActiveTerm(null);
-            return;
-          }
-          const live = msg.sessions.filter((item) => mine.includes(item.id));
-          setSessions(live);
-          for (const item of live) sendTerm({ type: 'attach', id: item.id });
-          setActiveTerm((cur) => (cur && live.some((item) => item.id === cur) ? cur : live[0]?.id || null));
+          setSessions(msg.sessions);
+          const ids = msg.sessions.map((item) => item.id);
+          for (const id of ids) sendTerm({ type: 'attach', id });
+          setActiveTerm((cur) => (cur && ids.includes(cur) ? cur : ids[0] || null));
         } else if (msg.type === 'created' || msg.type === 'renamed') {
           setSessions((prev) => upsertSession(prev, msg.session));
           if (msg.type === 'created') {
@@ -310,10 +304,6 @@ export function App() {
       termWs.current?.close();
     };
   }, []);
-
-  useEffect(() => {
-    pendingAttach.current = sessions.map((item) => item.id);
-  }, [sessions]);
 
   useEffect(() => {
     const path = selected;
