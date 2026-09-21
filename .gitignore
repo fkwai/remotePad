@@ -11,3 +11,6 @@ coverage
 .remotepad
 tmp
 samples/gitdemo/.git
+samples/plotdemo/latest.html
+samples/plotdemo/latest.png
+**/data/pet/

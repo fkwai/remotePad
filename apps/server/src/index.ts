@@ -13,8 +13,11 @@ import { registerMachineRoutes } from './routes/machine.ts';
 import { registerFavoriteRoutes } from './routes/favorites.ts';
 import { registerWorkspaceRoutes } from './routes/workspaces.ts';
 import { registerSessionRoutes } from './routes/session.ts';
+import { registerUiRoutes } from './routes/ui.ts';
 import { registerTermSocket } from './terminal/ws.ts';
 import { registerWatchSocket } from './watch.ts';
+import { registerAgentSocket } from './agent/ws.ts';
+import { writeRuntimeFile } from './plugins.ts';
 
 const app = Fastify({ logger: true });
 
@@ -34,8 +37,10 @@ await registerWorkspaceRoutes(app);
 await registerSessionRoutes(app);
 await registerSearchRoutes(app);
 await registerGitRoutes(app);
+await registerUiRoutes(app);
 await registerTermSocket(app);
 await registerWatchSocket(app);
+await registerAgentSocket(app);
 
 const webDist = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../web/dist');
 if (fs.existsSync(webDist)) {
@@ -50,4 +55,6 @@ if (fs.existsSync(webDist)) {
 }
 
 await app.listen({ host: config.host, port: config.port });
+const runtime = writeRuntimeFile();
 app.log.info(`RemotePad listening on http://${config.host}:${config.port}`);
+app.log.info(`runtime file ${runtime.path} → ${runtime.url}`);

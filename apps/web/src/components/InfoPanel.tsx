@@ -17,8 +17,7 @@ export function InfoPanel({
   onSelectTerm: (id: string) => void;
 }) {
   return (
-    <div className="pane">
-      <div className="pane-head">Machine</div>
+    <div className="info-pane">
       <div className="info">
         <h3>Path</h3>
         <div className="kv">{path || '—'}</div>

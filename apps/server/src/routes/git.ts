@@ -1,26 +1,10 @@
-import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { simpleGit } from 'simple-git';
 import type { FastifyInstance } from 'fastify';
 import type { GitFileStatus } from '@remotepad/shared';
+import { findRepoRoot } from '../git.ts';
 import { resolveSafe } from '../paths.ts';
-
-async function findRepoRoot(start: string): Promise<string | null> {
-  let current = start;
-  while (true) {
-    try {
-      const gitDir = path.join(current, '.git');
-      const stat = await fs.lstat(gitDir);
-      if (stat.isDirectory() || stat.isFile()) return current;
-    } catch {
-      // continue
-    }
-    const parent = path.dirname(current);
-    if (parent === current) return null;
-    current = parent;
-  }
-}
 
 export async function registerGitRoutes(app: FastifyInstance) {
   app.get<{ Querystring: { path?: string } }>('/api/git/status', async (req) => {
@@ -66,5 +50,21 @@ export async function registerGitRoutes(app: FastifyInstance) {
       }
     }
     return { repoRoot, path: target, diff };
+  });
+
+  app.post<{ Body: { path?: string } }>('/api/git/restore', async (req) => {
+    const target = resolveSafe(req.body?.path || '');
+    const repoRoot = await findRepoRoot(target);
+    if (!repoRoot) return { ok: false, error: 'Not a git repository' };
+    const git = simpleGit(repoRoot);
+    const rel = path.relative(repoRoot, target);
+    if (!rel || rel.startsWith('..')) return { ok: false, error: 'Path outside repository' };
+    try {
+      await git.checkout(['--', rel]);
+      return { ok: true, path: target, repoRoot };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      return { ok: false, error: message };
+    }
   });
 }

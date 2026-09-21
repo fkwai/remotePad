@@ -63,3 +63,19 @@ export async function unpinFavorite(input: string): Promise<Favorite[]> {
   await writeStore({ seeded: true, folders });
   return folders;
 }
+
+export async function reorderFavorites(paths: string[]): Promise<Favorite[]> {
+  const folders = await listFavorites();
+  const byPath = new Map(folders.map((item) => [item.path, item]));
+  const next: Favorite[] = [];
+  for (const raw of paths) {
+    const key = path.resolve(raw);
+    const item = byPath.get(key);
+    if (!item) continue;
+    next.push(item);
+    byPath.delete(key);
+  }
+  next.push(...byPath.values());
+  await writeStore({ seeded: true, folders: next });
+  return next;
+}

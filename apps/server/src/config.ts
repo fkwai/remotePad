@@ -23,4 +23,7 @@ export const config = {
   ].map((item) => path.resolve(item)),
   textSizeLimit: Number(process.env.REMOTEPAD_TEXT_LIMIT || 8 * 1024 * 1024),
   repoRoot: installRoot,
+  pluginsDir: path.join(installRoot, 'plugins'),
+  xiaobaPath: path.resolve(process.env.REMOTEPAD_XIAOBA_PATH || path.join(installRoot, '..', 'XiaoBa-CLI')),
+  xiaobaDataDir: path.join(os.homedir(), '.remotepad', 'xiaoba'),
 };

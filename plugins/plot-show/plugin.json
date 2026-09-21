@@ -1,0 +1,6 @@
+{
+  "id": "plot-show",
+  "kind": ["terminal"],
+  "pythonPath": "python",
+  "startup": "startup.py"
+}

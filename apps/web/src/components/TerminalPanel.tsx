@@ -3,27 +3,34 @@ import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { WebLinksAddon } from '@xterm/addon-web-links';
 import '@xterm/xterm/css/xterm.css';
-import type { TermSessionInfo } from '@remotepad/shared';
+import type { TermPlotInfo, TermSessionInfo } from '@remotepad/shared';
+import { readEntryDrag } from '../dnd';
+import { ActionMenu, type MenuItem } from './ContextMenu';
+import { basename } from '../files';
 
 export function TerminalPanel({
   sessions,
   activeId,
+  plots,
   onSelect,
   onCreate,
   onRename,
   onClose,
   onInput,
   onResize,
+  onOpenPlot,
   onDataRef,
 }: {
   sessions: TermSessionInfo[];
   activeId: string | null;
+  plots: TermPlotInfo[];
   onSelect: (id: string) => void;
   onCreate: () => void;
   onRename: (id: string, name: string) => void;
   onClose: (id: string) => void;
   onInput: (id: string, data: string) => void;
   onResize: (id: string, cols: number, rows: number) => void;
+  onOpenPlot: (path: string) => void;
   onDataRef: React.MutableRefObject<(id: string, data: string) => void>;
 }) {
   const hostRef = useRef<HTMLDivElement | null>(null);
@@ -33,9 +40,15 @@ export function TerminalPanel({
   const onResizeRef = useRef(onResize);
   const [renaming, setRenaming] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState('');
+  const [tabMenu, setTabMenu] = useState<{ x: number; y: number; id: string } | null>(null);
   activeRef.current = activeId;
   onInputRef.current = onInput;
   onResizeRef.current = onResize;
+
+  const activePlots = plots
+    .filter((item) => item.termId === activeId)
+    .slice()
+    .sort((a, b) => b.at - a.at);
 
   useEffect(() => {
     onDataRef.current = (id, data) => {
@@ -86,12 +99,6 @@ export function TerminalPanel({
           void writeClipboard(term.getSelection());
           return false;
         }
-        if ((mod && key === 'v') || (ev.shiftKey && key === 'insert')) {
-          void readClipboard().then((text) => {
-            if (text) onInputRef.current(session.id, text);
-          });
-          return false;
-        }
         return true;
       });
       el.addEventListener('contextmenu', (e) => {
@@ -128,7 +135,7 @@ export function TerminalPanel({
         onResizeRef.current(id, item.term.cols, item.term.rows);
       }
     }
-  }, [activeId, sessions]);
+  }, [activeId, sessions, activePlots.length]);
 
   useEffect(() => {
     const host = hostRef.current;
@@ -157,6 +164,12 @@ export function TerminalPanel({
               setRenaming(session.id);
               setRenameValue(session.name);
             }}
+            onContextMenu={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              onSelect(session.id);
+              setTabMenu({ x: e.clientX, y: e.clientY, id: session.id });
+            }}
           >
             <span className={`status-dot ${session.alive ? '' : 'off'}`} />
             {renaming === session.id ? (
@@ -184,11 +197,68 @@ export function TerminalPanel({
           </div>
         ))}
         <button className="ghost" onClick={onCreate}>+ Terminal</button>
-        <span className="hint">select then Ctrl+C or right-click to copy</span>
       </div>
-      <div className="term-body" ref={hostRef} />
+      {tabMenu && (
+        <ActionMenu
+          x={tabMenu.x}
+          y={tabMenu.y}
+          items={[
+            { type: 'item', id: 'rename', label: 'Rename', hint: 'Dbl-click' },
+            { type: 'item', id: 'close', label: 'Close', danger: true },
+          ] satisfies MenuItem[]}
+          onClose={() => setTabMenu(null)}
+          onAction={(id) => {
+            if (id === 'rename') {
+              const session = sessions.find((item) => item.id === tabMenu.id);
+              setRenaming(tabMenu.id);
+              setRenameValue(session?.name || '');
+            } else if (id === 'close') onClose(tabMenu.id);
+          }}
+        />
+      )}
+      <div className="term-split">
+        <div
+          className="term-body"
+          ref={hostRef}
+          onDragOver={(e) => e.preventDefault()}
+          onDrop={(e) => {
+            const entry = readEntryDrag(e);
+            if (!entry) return;
+            e.preventDefault();
+            const id = activeRef.current;
+            if (id) onInputRef.current(id, entry.path);
+          }}
+        />
+        <aside className={`term-plots ${activePlots.length ? '' : 'empty'}`}>
+          <div className="term-plots-head">Plots</div>
+          {activePlots.length === 0 ? (
+            <div className="term-plots-empty">fig.show() plots from this terminal appear here</div>
+          ) : (
+            <div className="term-plots-list">
+              {activePlots.map((plot) => (
+                <button
+                  type="button"
+                  key={plot.path}
+                  className="term-plot"
+                  title={plot.path}
+                  onClick={() => onOpenPlot(plot.path)}
+                >
+                  <span className="term-plot-title">{plot.title || basename(plot.path)}</span>
+                  <span className="term-plot-time">{formatTime(plot.at)}</span>
+                </button>
+              ))}
+            </div>
+          )}
+        </aside>
+      </div>
     </div>
   );
+}
+
+function formatTime(value: number): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
+  return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}:${String(date.getSeconds()).padStart(2, '0')}`;
 }
 
 async function writeClipboard(text: string) {

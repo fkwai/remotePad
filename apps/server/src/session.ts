@@ -6,14 +6,15 @@ import { config } from './config.ts';
 export const SESSION_PATH = path.join(config.repoRoot, 'tmp', 'session.json');
 
 const EMPTY: SessionState = {
-  workspacePath: null,
+  repoPath: null,
   treeRoot: '/',
   selected: '/',
   expanded: ['/'],
   tabs: [],
   activePath: null,
   sideTab: 'favorites',
-  termOpen: true,
+  termOpen: false,
+  rightTab: 'agent',
 };
 
 function asState(raw: unknown): SessionState {
@@ -23,7 +24,7 @@ function asState(raw: unknown): SessionState {
     ? item.tabs.flatMap((tab) => {
       if (!tab || typeof tab !== 'object') return [];
       const rec = tab as Record<string, unknown>;
-      if (typeof rec.path !== 'string' || rec.path.startsWith('diff:')) return [];
+      if (typeof rec.path !== 'string' || rec.path.startsWith('diff:') || rec.path.startsWith('agent:')) return [];
       const modes = ['rendered', 'source', 'icons', 'details'] as const;
       const viewMode = modes.includes(rec.viewMode as typeof modes[number])
         ? rec.viewMode as typeof modes[number]
@@ -38,15 +39,20 @@ function asState(raw: unknown): SessionState {
   const expanded = Array.isArray(item.expanded)
     ? item.expanded.filter((dir): dir is string => typeof dir === 'string' && dir.length > 0)
     : ['/'];
+  const repoPath = typeof item.repoPath === 'string'
+    ? item.repoPath
+    : (typeof item.workspacePath === 'string' ? item.workspacePath : null);
+  const sideTab = item.sideTab === 'repos' || item.sideTab === 'workspace' ? 'repos' : 'favorites';
   return {
-    workspacePath: typeof item.workspacePath === 'string' ? item.workspacePath : null,
+    repoPath,
     treeRoot: typeof item.treeRoot === 'string' && item.treeRoot ? item.treeRoot : '/',
     selected: typeof item.selected === 'string' ? item.selected : null,
     expanded: expanded.length ? expanded : ['/'],
     tabs,
     activePath: typeof item.activePath === 'string' ? item.activePath : null,
-    sideTab: item.sideTab === 'workspace' ? 'workspace' : 'favorites',
-    termOpen: item.termOpen !== false,
+    sideTab,
+    termOpen: item.termOpen === true,
+    rightTab: 'agent',
   };
 }
 

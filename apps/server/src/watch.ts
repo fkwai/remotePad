@@ -2,14 +2,20 @@ import chokidar, { type FSWatcher } from 'chokidar';
 import type { FastifyInstance } from 'fastify';
 import type { WatchClientMessage, WatchServerMessage } from '@remotepad/shared';
 import { resolveSafe } from './paths.ts';
+import { subscribeUi } from './ui-bus.ts';
 
 function send(socket: { send: (data: string) => void }, msg: WatchServerMessage) {
-  socket.send(JSON.stringify(msg));
+  try {
+    socket.send(JSON.stringify(msg));
+  } catch {
+    // socket may already be closed
+  }
 }
 
 export async function registerWatchSocket(app: FastifyInstance) {
   app.get('/ws/events', { websocket: true }, (socket) => {
     const watchers = new Map<string, FSWatcher>();
+    const unsubscribe = subscribeUi((msg) => send(socket, msg));
 
     const unwatch = async (target: string) => {
       const watcher = watchers.get(target);
@@ -52,6 +58,7 @@ export async function registerWatchSocket(app: FastifyInstance) {
     });
 
     socket.on('close', () => {
+      unsubscribe();
       for (const watcher of watchers.values()) void watcher.close();
       watchers.clear();
     });

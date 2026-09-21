@@ -3,6 +3,8 @@ import { randomUUID } from 'node:crypto';
 import pty from 'node-pty';
 import type { TermSessionInfo } from '@remotepad/shared';
 import { resolveSafe } from '../paths.ts';
+import { buildTerminalEnv } from '../plugins.ts';
+import { clearTermPlots } from '../routes/ui.ts';
 
 const MAX_REPLAY = 200_000;
 
@@ -40,12 +42,14 @@ export class SessionManager {
     const rows = opts.rows || 24;
     const id = randomUUID();
     const name = opts.name?.trim() || `term-${this.seq++}`;
+    const env = buildTerminalEnv(process.env);
+    env.REMOTEPAD_TERM_ID = id;
     const proc = pty.spawn(shell(), [], {
       name: 'xterm-256color',
       cols,
       rows,
       cwd,
-      env: { ...process.env, TERM: 'xterm-256color' },
+      env,
     });
     const session: Session = {
       id,
@@ -98,6 +102,7 @@ export class SessionManager {
       // already gone
     }
     this.sessions.delete(id);
+    clearTermPlots(id);
   }
 
   info(session: Session): TermSessionInfo {

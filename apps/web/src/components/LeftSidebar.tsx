@@ -1,66 +1,77 @@
 import { useRef, useState } from 'react';
 import { Panel, PanelGroup, PanelResizeHandle } from 'react-resizable-panels';
-import type { Favorite, FsEntry, Workspace } from '@remotepad/shared';
+import type { Favorite, FsEntry, Repo } from '@remotepad/shared';
+import { ActionMenu, type MenuItem } from './ContextMenu';
 import { FileTree } from './FileTree';
 
-export type SideTab = 'favorites' | 'workspace';
+export type SideTab = 'favorites' | 'repos';
 
 export function LeftSidebar({
   roots,
   treeRoot,
   selected,
+  revealTick,
   expanded,
   listings,
   favorites,
-  workspaces,
-  workspacePath,
+  repos,
+  repoPath,
   sideTab,
   onSideTab,
   onSelect,
   onToggle,
   onOpen,
   onBrowse,
+  onBrowseNew,
   onCreate,
   onRename,
   onDelete,
   onTerminal,
   onPin,
   onUnpin,
-  onAddWorkspace,
-  onRemoveWorkspace,
+  onAddRepo,
+  onRemoveRepo,
   onReveal,
-  onClearWorkspace,
+  onClearRepo,
   onGoUp,
   onOpenControl,
   onRunStartup,
+  onReorderFavorites,
+  onReorderRepos,
+  pendingPaths,
 }: {
   roots: string[];
   treeRoot: string;
   selected: string | null;
+  revealTick: number;
   expanded: Set<string>;
   listings: Record<string, FsEntry[]>;
   favorites: Favorite[];
-  workspaces: Workspace[];
-  workspacePath: string | null;
+  repos: Repo[];
+  repoPath: string | null;
   sideTab: SideTab;
   onSideTab: (tab: SideTab) => void;
   onSelect: (path: string, entry?: FsEntry) => void;
   onToggle: (path: string) => void;
-  onOpen: (entry: FsEntry) => void;
+  onOpen: (entry: FsEntry, temp?: boolean) => void;
   onBrowse: (entry: FsEntry) => void;
+  onBrowseNew: (entry: FsEntry) => void;
   onCreate: (dir: string, kind: 'file' | 'dir', name: string) => void;
   onRename: (from: string, name: string) => void;
   onDelete: (entry: FsEntry) => void;
   onTerminal: (dir: string) => void;
   onPin: (path: string) => void;
   onUnpin: (path: string) => void;
-  onAddWorkspace: (path: string) => void;
-  onRemoveWorkspace: (path: string) => void;
-  onReveal: (path: string, asWorkspace?: boolean) => void;
-  onClearWorkspace: () => void;
+  onAddRepo: (path: string) => void;
+  onRemoveRepo: (path: string) => void;
+  onReveal: (path: string, asRepo?: boolean) => void;
+  onClearRepo: () => void;
   onGoUp: () => void;
   onOpenControl: () => void;
-  onRunStartup: (ws: Workspace) => void;
+  onRunStartup: (repo: Repo) => void;
+  onReorderFavorites: (paths: string[]) => void;
+  onReorderRepos: (paths: string[]) => void;
+  pendingPaths?: Set<string>;
 }) {
   return (
     <PanelGroup direction="vertical" autoSaveId="remotepad-left" style={{ height: '100%' }}>
@@ -68,18 +79,20 @@ export function LeftSidebar({
         <SideLists
           treeRoot={treeRoot}
           favorites={favorites}
-          workspaces={workspaces}
-          workspacePath={workspacePath}
+          repos={repos}
+          repoPath={repoPath}
           sideTab={sideTab}
           onSideTab={onSideTab}
           onReveal={onReveal}
           onBrowse={onBrowse}
-          onClearWorkspace={onClearWorkspace}
+          onClearRepo={onClearRepo}
           onUnpin={onUnpin}
-          onRemoveWorkspace={onRemoveWorkspace}
+          onRemoveRepo={onRemoveRepo}
           onOpenControl={onOpenControl}
           onRunStartup={onRunStartup}
           onTerminal={onTerminal}
+          onReorderFavorites={onReorderFavorites}
+          onReorderRepos={onReorderRepos}
         />
       </Panel>
       <PanelResizeHandle className="resize-handle" />
@@ -88,23 +101,26 @@ export function LeftSidebar({
           roots={roots}
           treeRoot={treeRoot}
           selected={selected}
+          revealTick={revealTick}
           expanded={expanded}
           listings={listings}
           favorites={favorites}
-          workspaces={workspaces}
+          repos={repos}
           onSelect={onSelect}
           onToggle={onToggle}
           onOpen={onOpen}
           onBrowse={onBrowse}
+          onBrowseNew={onBrowseNew}
           onCreate={onCreate}
           onRename={onRename}
           onDelete={onDelete}
           onTerminal={onTerminal}
           onPin={onPin}
           onUnpin={onUnpin}
-          onAddWorkspace={onAddWorkspace}
-          onRemoveWorkspace={onRemoveWorkspace}
+          onAddRepo={onAddRepo}
+          onRemoveRepo={onRemoveRepo}
           onGoUp={onGoUp}
+          pendingPaths={pendingPaths}
         />
       </Panel>
     </PanelGroup>
@@ -114,45 +130,65 @@ export function LeftSidebar({
 function SideLists({
   treeRoot,
   favorites,
-  workspaces,
-  workspacePath,
+  repos,
+  repoPath,
   sideTab,
   onSideTab,
   onReveal,
   onBrowse,
-  onClearWorkspace,
+  onClearRepo,
   onUnpin,
-  onRemoveWorkspace,
+  onRemoveRepo,
   onOpenControl,
   onRunStartup,
   onTerminal,
+  onReorderFavorites,
+  onReorderRepos,
 }: {
   treeRoot: string;
   favorites: Favorite[];
-  workspaces: Workspace[];
-  workspacePath: string | null;
+  repos: Repo[];
+  repoPath: string | null;
   sideTab: SideTab;
   onSideTab: (tab: SideTab) => void;
-  onReveal: (path: string, asWorkspace?: boolean) => void;
+  onReveal: (path: string, asRepo?: boolean) => void;
   onBrowse: (entry: FsEntry) => void;
-  onClearWorkspace: () => void;
+  onClearRepo: () => void;
   onUnpin: (path: string) => void;
-  onRemoveWorkspace: (path: string) => void;
+  onRemoveRepo: (path: string) => void;
   onOpenControl: () => void;
-  onRunStartup: (ws: Workspace) => void;
+  onRunStartup: (repo: Repo) => void;
   onTerminal: (dir: string) => void;
+  onReorderFavorites: (paths: string[]) => void;
+  onReorderRepos: (paths: string[]) => void;
 }) {
-  const [menu, setMenu] = useState<{ x: number; y: number; path: string; kind: SideTab; ws?: Workspace } | null>(null);
+  const [menu, setMenu] = useState<{ x: number; y: number; path: string; kind: SideTab; repo?: Repo } | null>(null);
   const lastClick = useRef(0);
-  const items = sideTab === 'favorites' ? favorites : workspaces;
+  const dragPath = useRef<string | null>(null);
+  const [overPath, setOverPath] = useState<string | null>(null);
+  const items = sideTab === 'favorites' ? favorites : repos;
+
+  function move(from: string, to: string) {
+    if (from === to) return;
+    const paths = items.map((item) => item.path);
+    const fromAt = paths.indexOf(from);
+    const toAt = paths.indexOf(to);
+    if (fromAt < 0 || toAt < 0) return;
+    const next = paths.slice();
+    next.splice(fromAt, 1);
+    next.splice(toAt, 0, from);
+    if (sideTab === 'favorites') onReorderFavorites(next);
+    else onReorderRepos(next);
+  }
+
   return (
     <div className="pane">
       <div className="side-tabs">
         <button className={sideTab === 'favorites' ? 'active fav' : ''} onClick={() => onSideTab('favorites')}>Favorites</button>
-        <button className={sideTab === 'workspace' ? 'active ws' : ''} onClick={() => onSideTab('workspace')}>Workspace</button>
+        <button className={sideTab === 'repos' ? 'active ws' : ''} onClick={() => onSideTab('repos')}>Repos</button>
       </div>
       <div className="tree-body side-list">
-        {sideTab === 'workspace' && (
+        {sideTab === 'repos' && (
           <>
             <button type="button" className="tree-node control-item" onClick={onOpenControl} title="Edit ~/.remotepad/workspaces.json">
               <span className="tree-icon">☰</span>
@@ -160,8 +196,8 @@ function SideLists({
             </button>
             <button
               type="button"
-              className={`tree-node dir fav-item ws-item ${workspacePath === null ? 'active' : ''}`}
-              onClick={onClearWorkspace}
+              className={`tree-node dir fav-item ws-item ${repoPath === null ? 'active' : ''}`}
+              onClick={onClearRepo}
             >
               <span className="tree-icon">○</span>
               <span className="tree-name">none</span>
@@ -170,82 +206,120 @@ function SideLists({
         )}
         {items.length === 0 && (
           <div className="side-empty">
-            {sideTab === 'favorites' ? 'Right-click a folder to pin a favorite.' : 'Right-click a folder to add a workspace.'}
+            {sideTab === 'favorites' ? 'Right-click a folder to pin a favorite.' : 'Right-click a Git repo to add it.'}
           </div>
         )}
-        {items.map((item) => (
-          <button
-            type="button"
-            key={item.path}
-            className={`tree-node dir fav-item ${sideTab === 'workspace' ? 'ws-item' : ''} ${
-              sideTab === 'workspace' ? (workspacePath === item.path ? 'active' : '') : (treeRoot === item.path ? 'active' : '')
-            }`}
-            onClick={() => {
-              const now = Date.now();
-              const again = now - lastClick.current < 400;
-              lastClick.current = now;
-              if (again) return;
-              onReveal(item.path, sideTab === 'workspace');
-            }}
-            onDoubleClick={(e) => {
-              e.preventDefault();
-              onBrowse({ name: item.name, path: item.path, kind: 'dir' });
-            }}
-            onContextMenu={(e) => {
-              e.preventDefault();
-              e.stopPropagation();
-              setMenu({
-                x: e.clientX,
-                y: e.clientY,
-                path: item.path,
-                kind: sideTab,
-                ws: sideTab === 'workspace' ? item as Workspace : undefined,
-              });
-            }}
-            title={item.path}
-          >
-            <span className={`tree-icon pin-mark ${sideTab === 'workspace' ? 'ws-mark' : ''}`}>{sideTab === 'favorites' ? '★' : '◆'}</span>
-            <span className="tree-name">{item.name}</span>
-            <span
-              className="ghost pin"
-              onClick={(e) => {
-                e.stopPropagation();
-                if (sideTab === 'favorites') onUnpin(item.path);
-                else onRemoveWorkspace(item.path);
+        {items.map((item) => {
+          const repo = sideTab === 'repos' ? item as Repo : null;
+          const active = sideTab === 'repos' ? repoPath === item.path : treeRoot === item.path;
+          return (
+            <button
+              type="button"
+              key={item.path}
+              draggable
+              className={`tree-node dir fav-item ${sideTab === 'repos' ? 'ws-item' : ''} ${active ? 'active' : ''} ${overPath === item.path ? 'drop-over' : ''}`}
+              onClick={() => {
+                const now = Date.now();
+                const again = now - lastClick.current < 400;
+                lastClick.current = now;
+                if (again) return;
+                onReveal(item.path, sideTab === 'repos');
               }}
-            >×</span>
-          </button>
-        ))}
+              onDoubleClick={(e) => {
+                e.preventDefault();
+                onBrowse({ name: item.name, path: item.path, kind: 'dir' });
+              }}
+              onContextMenu={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                setMenu({
+                  x: e.clientX,
+                  y: e.clientY,
+                  path: item.path,
+                  kind: sideTab,
+                  repo: repo || undefined,
+                });
+              }}
+              onDragStart={() => { dragPath.current = item.path; }}
+              onDragOver={(e) => {
+                e.preventDefault();
+                if (overPath !== item.path) setOverPath(item.path);
+              }}
+              onDragLeave={() => {
+                if (overPath === item.path) setOverPath(null);
+              }}
+              onDrop={(e) => {
+                e.preventDefault();
+                setOverPath(null);
+                if (dragPath.current) move(dragPath.current, item.path);
+                dragPath.current = null;
+              }}
+              onDragEnd={() => {
+                dragPath.current = null;
+                setOverPath(null);
+              }}
+              title={item.path}
+            >
+              <span className={`tree-icon pin-mark ${sideTab === 'repos' ? 'ws-mark' : ''}`}>{sideTab === 'favorites' ? '★' : '◆'}</span>
+              <span className="tree-name">{item.name}</span>
+              {repo && <span className="repo-head">{repoLine(repo)}</span>}
+              <span
+                className="ghost pin"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (sideTab === 'favorites') onUnpin(item.path);
+                  else onRemoveRepo(item.path);
+                }}
+              >×</span>
+            </button>
+          );
+        })}
       </div>
       {menu && (
-        <>
-          <div style={{ position: 'fixed', inset: 0, zIndex: 40 }} onClick={() => setMenu(null)} />
-          <div className="menu" style={{ left: menu.x, top: menu.y }}>
-            {menu.kind === 'workspace' && menu.ws && (
-              <button
-                onClick={() => {
-                  onRunStartup(menu.ws!);
-                  setMenu(null);
-                }}
-              >Run startup</button>
-            )}
-            <button
-              onClick={() => {
-                onTerminal(menu.path);
-                setMenu(null);
-              }}
-            >Open terminal here</button>
-            <button
-              className="danger"
-              onClick={() => {
-                if (menu.kind === 'favorites') onUnpin(menu.path);
-                else onRemoveWorkspace(menu.path);
-                setMenu(null);
-              }}
-            >{menu.kind === 'favorites' ? 'Unpin' : 'Remove'}</button>
-          </div>
-        </>
+        <ActionMenu
+          x={menu.x}
+          y={menu.y}
+          items={[
+            { type: 'item', id: 'explore', label: 'Open in Explorer', hint: 'Dbl-click' },
+            ...(menu.kind === 'repos' && menu.repo
+              ? [{ type: 'item' as const, id: 'startup', label: 'Run startup' }]
+              : []),
+            { type: 'item', id: 'term', label: 'Open terminal here' },
+            { type: 'sep' },
+            {
+              type: 'item',
+              id: 'remove',
+              label: menu.kind === 'favorites' ? 'Unpin favorite' : 'Remove from repos',
+              danger: true,
+            },
+          ] satisfies MenuItem[]}
+          onClose={() => setMenu(null)}
+          onAction={(id) => {
+            if (id === 'explore') onBrowse({ name: basename(menu.path), path: menu.path, kind: 'dir' });
+            else if (id === 'startup' && menu.repo) onRunStartup(menu.repo);
+            else if (id === 'term') onTerminal(menu.path);
+            else if (id === 'remove') {
+              if (menu.kind === 'favorites') onUnpin(menu.path);
+              else onRemoveRepo(menu.path);
+            }
+          }}
+        />
       )}
     </div>
   );
+}
+
+function basename(filePath: string): string {
+  return filePath.split('/').filter(Boolean).pop() || filePath;
+}
+
+function repoLine(repo: Repo): string {
+  if (!repo.branch && !repo.lastCommit) return 'not a git repo';
+  const bits: string[] = [];
+  bits.push(repo.branch || 'detached');
+  if (repo.ahead) bits.push(`↑${repo.ahead}`);
+  if (repo.behind) bits.push(`↓${repo.behind}`);
+  if (repo.dirty) bits.push(`*${repo.dirty}`);
+  if (repo.lastCommit) bits.push(`${repo.lastCommit.hash} ${repo.lastCommit.message}`);
+  return bits.join(' ');
 }

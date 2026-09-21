@@ -2,7 +2,6 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import type { FastifyInstance } from 'fastify';
 import type { FsEntry, FsKind, FsReadResponse } from '@remotepad/shared';
-import { config } from '../config.ts';
 import { PathError, exists, resolveSafe, uniqueRoots } from '../paths.ts';
 
 const IMAGE_EXT = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg', '.bmp', '.ico']);
@@ -73,9 +72,6 @@ export async function registerFsRoutes(app: FastifyInstance) {
     const target = resolveSafe(req.query.path || '');
     const stat = await fs.stat(target);
     if (stat.isDirectory()) throw new PathError('Cannot read a directory');
-    if (stat.size > config.textSizeLimit) {
-      throw new PathError(`File exceeds ${config.textSizeLimit} byte limit`, 413);
-    }
     const buf = await fs.readFile(target);
     const ext = path.extname(target).toLowerCase();
     const binary = looksBinary(buf) && ext !== '.svg';

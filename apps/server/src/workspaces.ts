@@ -1,13 +1,20 @@
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import type { Workspace } from '@remotepad/shared';
+import type { Repo } from '@remotepad/shared';
 import { PathError, resolveSafe } from './paths.ts';
+import { findRepoRoot, readRepoHead } from './git.ts';
 
 export const CONTROL_PATH = path.join(os.homedir(), '.remotepad', 'workspaces.json');
 
+interface Stored {
+  path: string;
+  name: string;
+  startup?: string[];
+}
+
 interface Store {
-  folders: Workspace[];
+  folders: Stored[];
 }
 
 function asLines(value: unknown): string[] {
@@ -20,35 +27,35 @@ function asLines(value: unknown): string[] {
   return [];
 }
 
-function asWorkspace(raw: unknown): { ws: Workspace; migrated: boolean } | null {
+function asStored(raw: unknown): { item: Stored; migrated: boolean } | null {
   if (!raw || typeof raw !== 'object') return null;
-  const item = raw as Record<string, unknown>;
-  if (typeof item.path !== 'string' || typeof item.name !== 'string') return null;
-  let startup = asLines(item.startup);
+  const rec = raw as Record<string, unknown>;
+  if (typeof rec.path !== 'string' || typeof rec.name !== 'string') return null;
+  let startup = asLines(rec.startup);
   let migrated = false;
   if (startup.length === 0) {
-    const activate = typeof item.activate === 'string' ? item.activate.trim() : '';
-    const python = typeof item.python === 'string' ? item.python.trim() : '';
+    const activate = typeof rec.activate === 'string' ? rec.activate.trim() : '';
+    const python = typeof rec.python === 'string' ? rec.python.trim() : '';
     if (activate) startup.push(`source ${activate}`);
     if (python) startup.push(python);
     migrated = startup.length > 0;
   }
-  const ws: Workspace = { path: item.path, name: item.name };
-  if (startup.length) ws.startup = startup;
-  if ('seeded' in item || 'activate' in item || 'python' in item) migrated = true;
-  return { ws, migrated };
+  const item: Stored = { path: rec.path, name: rec.name };
+  if (startup.length) item.startup = startup;
+  if ('seeded' in rec || 'activate' in rec || 'python' in rec) migrated = true;
+  return { item, migrated };
 }
 
 async function readStore(): Promise<{ store: Store; migrated: boolean }> {
   try {
     const raw = JSON.parse(await fs.readFile(CONTROL_PATH, 'utf8')) as Record<string, unknown>;
     const list = Array.isArray(raw.folders) ? raw.folders : [];
-    const folders: Workspace[] = [];
+    const folders: Stored[] = [];
     let migrated = 'seeded' in raw;
     for (const item of list) {
-      const parsed = asWorkspace(item);
+      const parsed = asStored(item);
       if (!parsed) continue;
-      folders.push(parsed.ws);
+      folders.push(parsed.item);
       if (parsed.migrated) migrated = true;
     }
     return { store: { folders }, migrated };
@@ -62,13 +69,17 @@ async function writeStore(store: Store) {
   await fs.writeFile(CONTROL_PATH, JSON.stringify({ folders: store.folders }, null, 2));
 }
 
-export async function listWorkspaces(): Promise<Workspace[]> {
-  const { store, migrated } = await readStore();
-  if (migrated) await writeStore(store);
-  return store.folders;
+async function withHeads(folders: Stored[]): Promise<Repo[]> {
+  return Promise.all(folders.map((item) => readRepoHead(item.path, item.name, item.startup)));
 }
 
-export async function pinWorkspace(input: string): Promise<Workspace[]> {
+export async function listRepos(): Promise<Repo[]> {
+  const { store, migrated } = await readStore();
+  if (migrated) await writeStore(store);
+  return withHeads(store.folders);
+}
+
+export async function pinRepo(input: string): Promise<Repo[]> {
   const target = resolveSafe(input);
   let stat;
   try {
@@ -76,17 +87,37 @@ export async function pinWorkspace(input: string): Promise<Workspace[]> {
   } catch {
     throw new PathError('Path not found', 404);
   }
-  if (!stat.isDirectory()) throw new PathError('Only folders can be added to a workspace');
-  const folders = await listWorkspaces();
-  if (folders.some((item) => item.path === target)) return folders;
-  folders.push({ path: target, name: path.basename(target) || target });
-  await writeStore({ folders });
-  return folders;
+  if (!stat.isDirectory()) throw new PathError('Only folders can be added as a repo');
+  const root = await findRepoRoot(target);
+  if (!root) throw new PathError('Only Git repositories can be added as a repo');
+  const { store } = await readStore();
+  if (store.folders.some((item) => item.path === root)) return withHeads(store.folders);
+  store.folders.push({ path: root, name: path.basename(root) || root });
+  await writeStore(store);
+  return withHeads(store.folders);
 }
 
-export async function unpinWorkspace(input: string): Promise<Workspace[]> {
+export async function unpinRepo(input: string): Promise<Repo[]> {
   const target = path.resolve(input);
-  const folders = (await listWorkspaces()).filter((item) => item.path !== target);
-  await writeStore({ folders });
-  return folders;
+  const { store } = await readStore();
+  store.folders = store.folders.filter((item) => item.path !== target);
+  await writeStore(store);
+  return withHeads(store.folders);
+}
+
+export async function reorderRepos(paths: string[]): Promise<Repo[]> {
+  const { store } = await readStore();
+  const byPath = new Map(store.folders.map((item) => [item.path, item]));
+  const next: Stored[] = [];
+  for (const raw of paths) {
+    const key = path.resolve(raw);
+    const item = byPath.get(key);
+    if (!item) continue;
+    next.push(item);
+    byPath.delete(key);
+  }
+  next.push(...byPath.values());
+  store.folders = next;
+  await writeStore(store);
+  return withHeads(store.folders);
 }
