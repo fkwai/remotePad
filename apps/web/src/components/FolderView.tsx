@@ -67,6 +67,23 @@ export function FolderView({
     setConfirm(null);
   }, [dir]);
 
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Delete' && e.key !== 'Backspace') return;
+      const target = e.target as HTMLElement | null;
+      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) return;
+      if (draft || menu || confirm) return;
+      if (picked.length === 0) return;
+      e.preventDefault();
+      const list = entries || [];
+      const targets = list.filter((item) => picked.includes(item.path));
+      if (targets.length === 0) return;
+      setConfirm(targets);
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [picked, entries, draft, menu, confirm]);
+
   const items = entries || [];
   const blank: FsEntry = { name: dir, path: dir, kind: 'dir' };
   const byPath = new Map(items.map((item) => [item.path, item]));
@@ -358,7 +375,7 @@ function ExplorerMenu({
       { type: 'item', id: 'copy-path', label: 'Copy paths' },
       { type: 'item', id: 'download', label: 'Download' },
       { type: 'sep' },
-      { type: 'item', id: 'delete', label: 'Delete', danger: true },
+      { type: 'item', id: 'delete', label: 'Delete', hint: 'Del', danger: true },
     ]
     : [
       ...(isBlank
@@ -383,7 +400,7 @@ function ExplorerMenu({
       { type: 'item', id: 'new-file', label: 'New file' },
       { type: 'item', id: 'new-dir', label: 'New folder' },
       ...(!isBlank ? [{ type: 'item' as const, id: 'rename', label: 'Rename' }] : []),
-      ...(!isBlank ? [{ type: 'item' as const, id: 'delete', label: 'Delete', danger: true }] : []),
+      ...(!isBlank ? [{ type: 'item' as const, id: 'delete', label: 'Delete', hint: 'Del', danger: true }] : []),
       { type: 'sep' },
       { type: 'item', id: 'term', label: 'Open terminal here' },
     ];

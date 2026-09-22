@@ -26,7 +26,7 @@ export function App() {
   const [activeTerm, setActiveTerm] = useState<string | null>(null);
   const [git, setGit] = useState<GitStatusResponse | null>(null);
   const [toast, setToast] = useState<string | null>(null);
-  const [termOpen, setTermOpen] = useState(false);
+  const [termOpen, setTermOpen] = useState(true);
   const [favorites, setFavorites] = useState<Favorite[]>([]);
   const [repos, setRepos] = useState<Repo[]>([]);
   const [controlPath, setControlPath] = useState<string | null>(null);
@@ -139,7 +139,7 @@ export function App() {
         setTreeRoot(tree);
         setSelected(session?.selected || tree);
         setSideTab(session?.sideTab === 'repos' ? 'repos' : 'favorites');
-        setTermOpen(session ? session.termOpen : false);
+        setTermOpen(session?.termOpen ?? true);
         const expandedDirs = session?.expanded?.length ? session.expanded : [tree];
         setExpanded(new Set(expandedDirs));
         await loadDir(tree);
@@ -1097,6 +1097,12 @@ export function App() {
             }}
           />
         </div>
+        <button
+          type="button"
+          className={`term-toggle ${termOpen ? 'on' : ''}`}
+          title={termOpen ? 'Hide terminal (Ctrl/⌘+`)' : 'Show terminal (Ctrl/⌘+`)'}
+          onClick={() => setTermOpen((v) => !v)}
+        >Terminal</button>
         {machine && (
           <button
             type="button"

@@ -1,3 +1,4 @@
+import { useLayoutEffect, useRef, useState } from 'react';
 import type { FsEntry } from '@remotepad/shared';
 
 export interface MenuState {
@@ -32,10 +33,29 @@ export function ActionMenu({
   onAction: (id: string) => void;
   onClose: () => void;
 }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [pos, setPos] = useState({ left: x, top: y });
+
+  useLayoutEffect(() => {
+    const node = ref.current;
+    if (!node) return;
+    const margin = 8;
+    const rect = node.getBoundingClientRect();
+    let left = x;
+    let top = y;
+    if (top + rect.height + margin > window.innerHeight) {
+      top = Math.max(margin, y - rect.height);
+    }
+    if (left + rect.width + margin > window.innerWidth) {
+      left = Math.max(margin, window.innerWidth - rect.width - margin);
+    }
+    setPos((prev) => (prev.left === left && prev.top === top ? prev : { left, top }));
+  }, [x, y, items]);
+
   return (
     <>
       <div style={{ position: 'fixed', inset: 0, zIndex: 40 }} onMouseDown={onClose} />
-      <div className="menu" style={{ left: x, top: y }} role="menu">
+      <div className="menu" ref={ref} style={{ left: pos.left, top: pos.top }} role="menu">
         {items.map((item, i) => {
           if (item.type === 'sep') return <hr key={`sep-${i}`} />;
           return (

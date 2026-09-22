@@ -168,6 +168,21 @@ input:focus { border-color: #4a7f73; }
   font-weight: 400;
 }
 .topbar .spacer { flex: 1; }
+.term-toggle {
+  flex: 0 0 auto;
+  font-size: 12px;
+  color: var(--muted);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 4px 10px;
+  background: transparent;
+}
+.term-toggle:hover { background: var(--panel-3); color: var(--text); }
+.term-toggle.on {
+  color: var(--accent);
+  border-color: #4a7f73;
+  background: #14302c;
+}
 .host-btn {
   flex: 0 0 auto;
   background: transparent;
@@ -519,6 +534,7 @@ button.tree-node:hover { border-color: transparent; }
   overflow: auto;
   display: flex;
   flex-direction: column;
+  user-select: none;
 }
 .folder-icons {
   display: grid;

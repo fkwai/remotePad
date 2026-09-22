@@ -30,7 +30,7 @@ Do not call the left region the file-tree panel: the tree is only the lower part
 
 **Editor** is the middle-top region, not “view”. A *viewer* is a file mode inside the Editor (Markdown, CSV, image, …).
 
-**Terminal** is the middle-bottom region (`Ctrl/\`` toggles it).
+**Terminal** is the middle-bottom region (open by default; top bar **Terminal** or `Ctrl/\`` toggles it).
 
 **Agent** is the right dock. Do not call it the AI panel; Agent is the product name in the UI.
 

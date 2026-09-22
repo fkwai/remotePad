@@ -67,6 +67,8 @@ Product docs: `README.md`. This file (`AGENTS.md`) is the helper map — if it d
 
 **Product rule:** single-click and drag are the only gestures users must know. Everything else is on a **right-click menu** that shows the action and its hotkey/gesture hint. Double-click and keyboard shortcuts still work as power shortcuts; they are not the primary way to learn the UI.
 
+**Hotkey hint rule:** when a behavior has a keyboard shortcut or gesture, the matching right-click menu item must show it in its `hint` (e.g. `Ctrl/⌘+S`, `Shift+Enter`, `Del`, `Dbl-click`). Adding a hotkey to a behavior without adding its hint next to the right-click item is a bug; the hint lives on the `MenuItem.hint` field in `ContextMenu.tsx`.
+
 If a job is about click / double-click / reveal / scroll, read this table first. Fix the named widget; do not steal Monaco word-select to implement an **editor tab** job.
 
 | Surface | Gesture | Behavior |
@@ -84,6 +86,7 @@ If a job is about click / double-click / reveal / scroll, read this table first.
 | Address bar | Enter | dir → Explorer; file → `revealInTree` |
 | Editor **tab** | right-click | reveal / keep / save / close left·right·all |
 | Editor **tab** | active | Bright left strip + bottom underline (`.tab.active`) |
+| Terminal panel | default | Open on load; top bar **Terminal** button or `Ctrl/⌘+\`` toggles show/hide |
 | Terminal | plots subpanel | Lists Plotly HTML from this term; closing the term clears its plots |
 | Editor **body** | right-click | Run line/selection · Save (hints Shift+Enter / Ctrl+S) |
 | Editor **body** | Shift+Enter (`.py`) | Dedent selection and wrap in `exec(compile(...))` so REPL `if`/`else` blocks are not broken by blank lines; other languages paste raw |
@@ -93,7 +96,7 @@ If a job is about click / double-click / reveal / scroll, read this table first.
 | Folder explorer item | single click | select only (Ctrl/Cmd multi, Shift range); does **not** open |
 | Folder explorer empty | single click | clear selection |
 | Folder explorer item | double-click / menu Open | file → open in Editor; dir → navigate Explorer |
-| Folder explorer selection | right-click menu | Download (files) · Delete |
+| Folder explorer selection | right-click menu / Del | Download (files) · Delete |
 | Editor toolbar | Revert | discard dirty buffer; `git restore` to HEAD when in a repo, then reload from disk |
 | Agent **tab** | right-click | Open session JSONL · Rename · Close |
 | Agent compose | — | pinned at bottom (never clipped); input stays enabled while running |
