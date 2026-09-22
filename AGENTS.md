@@ -52,6 +52,7 @@ UI regions (product names): **Sidebar** (left), **Editor** (middle top), **Termi
 | Agent host (XiaoBa embed) | `apps/server/src/agent/host.ts`, `ws.ts` |
 | Workspaces / Repos store | `~/.remotepad/workspaces.json` (server routes under `apps/server`) |
 | Favorites | `~/.remotepad/favorites.json` |
+| Host / ports | `settings.json` at install root (`host`, `port`, `uiPort`; env overrides) |
 | UI session restore | `tmp/session.json` under this repo |
 | Shared protocol | `packages/shared/src/index.ts` |
 | Install / LLM path | `apps/server/src/config.ts` (`repoRoot`, `xiaobaPath`) |

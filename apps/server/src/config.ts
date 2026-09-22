@@ -1,7 +1,7 @@
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { DEFAULT_HOST, DEFAULT_PORT } from '@remotepad/shared';
+import { resolveRuntimeSettings } from '@remotepad/shared';
 
 function splitRoots(raw: string | undefined): string[] {
   if (!raw) return [];
@@ -11,9 +11,13 @@ function splitRoots(raw: string | undefined): string[] {
 const here = path.dirname(fileURLToPath(import.meta.url));
 const installRoot = path.resolve(here, '../../..');
 
+const settingsPath = process.env.REMOTEPAD_SETTINGS || path.join(installRoot, 'settings.json');
+const runtime = resolveRuntimeSettings(settingsPath);
+
 export const config = {
-  host: process.env.REMOTEPAD_HOST || DEFAULT_HOST,
-  port: Number(process.env.REMOTEPAD_PORT || DEFAULT_PORT),
+  host: runtime.host,
+  port: runtime.port,
+  uiPort: runtime.uiPort,
   roots: [
     '/',
     os.homedir(),

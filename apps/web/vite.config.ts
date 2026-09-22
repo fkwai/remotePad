@@ -1,18 +1,25 @@
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
+import { resolveRuntimeSettings } from '@remotepad/shared';
+
+const installRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
+const settingsPath = process.env.REMOTEPAD_SETTINGS || path.join(installRoot, 'settings.json');
+const { host, port, uiPort } = resolveRuntimeSettings(settingsPath);
 
 export default defineConfig({
   plugins: [react()],
   server: {
-    host: '127.0.0.1',
-    port: 5173,
+    host,
+    port: uiPort,
     proxy: {
-      '/api': { target: 'http://127.0.0.1:3847' },
-      '/ws': { target: 'ws://127.0.0.1:3847', ws: true },
+      '/api': { target: `http://${host}:${port}` },
+      '/ws': { target: `ws://${host}:${port}`, ws: true },
     },
   },
   preview: {
-    host: '127.0.0.1',
-    port: 5173,
+    host,
+    port: uiPort,
   },
 });

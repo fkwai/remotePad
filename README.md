@@ -75,20 +75,101 @@ pnpm start
 
 ## Access
 
-The server binds to localhost by default. Reach it with:
+RemotePad listens on localhost on the machine where it runs. There is no authentication — do not expose it to the public internet.
 
-- a browser on the same machine
-- an SSH tunnel: `ssh -L 5173:127.0.0.1:5173 -L 3847:127.0.0.1:3847 user@host`
-- Tailscale: set `REMOTEPAD_HOST` to the Tailscale IP or `0.0.0.0`
+### Remote machine from your laptop
 
-There is no authentication. Do not expose this to the public internet.
+Three steps:
+
+**1 — SSH to the remote and start RemotePad**
+
+```bash
+ssh user@remote-host
+cd ~/git/remotePad
+pnpm install          # first time only
+./scripts/remotepad.sh up
+```
+
+**2 — On your laptop, open a local tunnel** (leave this terminal running)
+
+```bash
+./scripts/remotepad-tunnel.sh user@remote-host
+```
+
+One-liner (same ports as repo `settings.json`):
+
+```bash
+ssh -N -L 5173:127.0.0.1:5173 -L 3847:127.0.0.1:3847 user@remote-host
+```
+
+**3 — Browser**
+
+Open [http://127.0.0.1:5173](http://127.0.0.1:5173).
+
+Using the same machine? Skip step 2.
+
+**Tailscale / LAN:** set `"host": "0.0.0.0"` in repo `settings.json`, run `pnpm build && REMOTEPAD_MODE=prod ./scripts/remotepad.sh up`, then browse `http://<tailscale-ip>:3847`.
+
+### Always-on service (systemd)
+
+So RemotePad starts when the machine boots and you do not have to SSH in first:
+
+```bash
+cd ~/git/remotePad
+pnpm install
+pnpm build
+
+# edit WorkingDirectory in the unit file, then install:
+mkdir -p ~/.config/systemd/user
+cp scripts/remotepad.service ~/.config/systemd/user/
+$EDITOR ~/.config/systemd/user/remotepad.service   # set WorkingDirectory
+
+systemctl --user daemon-reload
+systemctl --user enable --now remotepad.service
+loginctl enable-linger $USER   # run at boot even without a login session
+```
+
+Check status: `systemctl --user status remotepad.service`
+
+The unit runs production mode (`pnpm start`, port 3847). For dev mode with hot reload, use `./scripts/remotepad.sh up` manually instead.
+
+### Helper scripts
+
+```bash
+chmod +x scripts/remotepad.sh scripts/remotepad-tunnel.sh
+
+# remote — foreground / background
+./scripts/remotepad.sh dev
+./scripts/remotepad.sh up
+./scripts/remotepad.sh status
+./scripts/remotepad.sh open
+./scripts/remotepad.sh down
+```
+
+Shell profile aliases (`~/.bashrc`, `~/.zshrc`):
+
+```bash
+export REMOTEPAD_ROOT="$HOME/git/remotePad"
+alias remotepad='$REMOTEPAD_ROOT/scripts/remotepad.sh'
+alias remotepad-tunnel='$REMOTEPAD_ROOT/scripts/remotepad-tunnel.sh'
+```
+
+PowerShell tunnel (Windows laptop):
+
+```powershell
+& 'C:\path\to\remotePad\scripts\remotepad-tunnel.ps1' user@remote-host
+```
 
 ## Environment
 
+Repo `settings.json`: `host`, `port` (API / prod UI), `uiPort` (Vite dev only). Env vars override the file.
+
 | Variable | Default | Meaning |
 | --- | --- | --- |
-| `REMOTEPAD_HOST` | `127.0.0.1` | Bind address |
-| `REMOTEPAD_PORT` | `3847` | Backend port |
+| `REMOTEPAD_HOST` | `settings.json` → `127.0.0.1` | Bind address |
+| `REMOTEPAD_PORT` | `settings.json` → `3847` | Backend port |
+| `REMOTEPAD_UI_PORT` | `settings.json` → `5173` | Vite dev UI port |
+| `REMOTEPAD_SETTINGS` | `<install>/settings.json` | Path to settings file |
 | `REMOTEPAD_ROOTS` | _(empty)_ | Extra allowed filesystem roots, colon-separated |
 | `REMOTEPAD_TEXT_LIMIT` | `8388608` | Max editable file size in bytes |
 | `REMOTEPAD_XIAOBA_PATH` | `../XiaoBa-CLI` (sibling of this repo) | Path to a built XiaoBa-CLI install used by the Agent panel |

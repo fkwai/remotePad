@@ -1,0 +1,24 @@
+# systemd user unit — copy and edit paths, then:
+#   mkdir -p ~/.config/systemd/user
+#   cp scripts/remotepad.service ~/.config/systemd/user/
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now remotepad.service
+#   loginctl enable-linger $USER    # start at boot without an open login session
+#
+# Uses production mode (single port, built UI). Run `pnpm build` once before enabling.
+
+[Unit]
+Description=RemotePad
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/path/to/remotePad
+Environment=REMOTEPAD_MODE=prod
+Environment=PATH=/usr/local/bin:/usr/bin:/bin
+ExecStart=/usr/bin/env pnpm start
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

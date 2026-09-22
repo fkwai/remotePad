@@ -261,5 +261,12 @@ export type AgentServerMessage =
   | { type: 'error'; message: string };
 
 export const TEXT_SIZE_LIMIT = 8 * 1024 * 1024;
-export const DEFAULT_PORT = 3847;
-export const DEFAULT_HOST = '127.0.0.1';
+
+export {
+  DEFAULT_HOST,
+  DEFAULT_PORT,
+  DEFAULT_UI_PORT,
+  readSettingsFile,
+  resolveRuntimeSettings,
+  type RemotePadSettings,
+} from './settings.ts';
