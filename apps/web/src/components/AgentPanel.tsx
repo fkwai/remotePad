@@ -59,6 +59,7 @@ export function AgentPanel({
 }) {
   const logRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const pinBottom = useRef(false);
   const [query, setQuery] = useState('');
   const [renaming, setRenaming] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState('');
@@ -75,7 +76,10 @@ export function AgentPanel({
     const node = logRef.current;
     if (!node) return;
     const nearBottom = node.scrollHeight - node.scrollTop - node.clientHeight < 80;
-    if (nearBottom) node.scrollTop = node.scrollHeight;
+    if (nearBottom || pinBottom.current) {
+      node.scrollTop = node.scrollHeight;
+      pinBottom.current = false;
+    }
     const away = node.scrollHeight - node.scrollTop - node.clientHeight;
     setShowJump(away > node.clientHeight);
   }, [messages]);
@@ -151,6 +155,7 @@ export function AgentPanel({
     const chipBlock = chips.map((item) => item.path).join('\n');
     const body = [chipBlock, text].filter((part) => part.trim()).join('\n\n');
     if (!body.trim() || busy) return;
+    pinBottom.current = true;
     onSend(body);
     if (inputRef.current) inputRef.current.value = '';
     setChips([]);
