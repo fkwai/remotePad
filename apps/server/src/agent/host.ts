@@ -182,12 +182,15 @@ function isCheckpointUser(msg: { __checkpointSummary?: unknown; content?: unknow
   return text.startsWith('Another language model started to solve') || text.includes('## Handoff summary');
 }
 
+const AGENT_LANGUAGE =
+  '## Language\n\nReply in English. The user writes in English; always respond in English unless the user writes in another language. Do not reply in Chinese.';
+
 function composeHelperPrompt(base: string, latestUser: string): string {
   const brief = readAgentsBrief();
   const status = helperGitSnapshot();
   const latest = latestUser.trim();
   const parts = [
-    '## Language\n\nReply in English. The user writes in English; always respond in English unless the user writes in another language. Do not reply in Chinese.',
+    AGENT_LANGUAGE,
     base.trim(),
     brief ? `## RemotePad helper brief\n\n${brief}` : '## RemotePad helper brief\n\nYou edit only the RemotePad repo at the fixed cwd.',
     `## Helper process\n\nAGENTS.md is the product map. Chat JSONL is scratch. Refresh wipes this Helper chat; lasting work already lives in git and AGENTS.md.\nXiaoBa summaries are fine for older work. The latest user message is the current job — if a summary disagrees about what to change, follow that message and AGENTS.md.`,
@@ -515,7 +518,7 @@ export class AgentHost {
   }
 
   private attachHelperPrompt(loaded: XiaobaMods, profile: unknown, bundle: XiaobaBundle): void {
-    if (!isHelperSession(this.sessionId) || !bundle.session.setSystemPromptProvider) return;
+    if (!bundle.session.setSystemPromptProvider) return;
     const baseProvider = loaded.RuntimeFactory.createSessionSystemPromptProvider?.(
       profile,
       this.sessionId,
@@ -523,7 +526,11 @@ export class AgentHost {
     );
     bundle.session.setSystemPromptProvider(async () => {
       const base = baseProvider ? await baseProvider() : '';
-      return composeHelperPrompt(typeof base === 'string' ? base : '', this.helperLastUser);
+      if (isHelperSession(this.sessionId)) {
+        return composeHelperPrompt(typeof base === 'string' ? base : '', this.helperLastUser);
+      }
+      // General agent: keep XiaoBa's base prompt but enforce English replies.
+      return `${AGENT_LANGUAGE}\n\n${typeof base === 'string' ? base : ''}`.trim();
     });
   }
 
