@@ -7,8 +7,11 @@ const TYPE = 'application/x-remotepad-entry';
 export function setEntryDrag(e: DragEvent, entry: DraggedEntry) {
   const name = entry.name || entry.path.split('/').filter(Boolean).pop() || entry.path;
   e.dataTransfer.setData(TYPE, JSON.stringify({ ...entry, name }));
-  e.dataTransfer.setData('text/plain', entry.path);
-  e.dataTransfer.setData('text/uri-list', browserFileUrl(entry.path));
+  // Browser address-bar drops read text/plain (or text/uri-list) and navigate to it,
+  // so both must carry the full `?pad=` URL — a raw path here opens an empty editor.
+  const url = browserPadUrl(entry.path);
+  e.dataTransfer.setData('text/plain', url);
+  e.dataTransfer.setData('text/uri-list', url);
   e.dataTransfer.effectAllowed = 'copy';
 }
 
@@ -36,7 +39,13 @@ export function hasEntryDrag(e: DragEvent): boolean {
   return Array.from(e.dataTransfer.types).includes(TYPE);
 }
 
-/** Absolute URL that opens the file in a normal browser tab via RemotePad. */
+/** Slim tree + editor window for this path (drop on the browser address bar). */
+export function browserPadUrl(filePath: string): string {
+  const origin = typeof location !== 'undefined' ? location.origin : '';
+  return `${origin}/?pad=${encodeURIComponent(filePath)}`;
+}
+
+/** Absolute URL that streams the raw file bytes. */
 export function browserFileUrl(filePath: string): string {
   const origin = typeof location !== 'undefined' ? location.origin : '';
   return `${origin}/api/fs/raw?path=${encodeURIComponent(filePath)}`;

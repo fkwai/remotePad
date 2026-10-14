@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import type { Favorite, FsEntry, Repo, SearchHit } from '@remotepad/shared';
-import { api } from '../api';
+import { api, downloadFile } from '../api';
 import { fileMark } from '../files';
 import { setEntryDrag } from '../dnd';
 import { ContextMenu, type MenuState } from './ContextMenu';
@@ -120,6 +120,7 @@ export function FileTree({
   function onAction(action: string, entry: FsEntry) {
     const dir = entry.kind === 'dir' ? entry.path : parentOf(entry.path);
     if (action === 'copy-path') void navigator.clipboard.writeText(entry.path);
+    else if (action === 'download' && entry.kind !== 'dir') downloadFile(entry.path, entry.name);
     else if (action === 'explore') onBrowse(entry);
     else if (action === 'explore-new') onBrowseNew(entry);
     else if (action === 'open-keep') onOpen(entry, false);
@@ -364,13 +365,14 @@ function TreeNode({
             onToggle(entry.path);
           }}
         >
-          {isDir && (
+          {isDir ? (
             <svg className="tree-chevron" viewBox="0 0 16 16" aria-hidden>
               <path d="M6 3.5L11 8l-5 4.5" />
             </svg>
-          )}
+          ) : mark ? (
+            <span className={`file-mark ${mark.cls}`}>{mark.text}</span>
+          ) : null}
         </span>
-        {mark && <span className={`file-mark ${mark.cls}`}>{mark.text}</span>}
         <span className="tree-name">{entry.name}</span>
         {pendingPaths?.has(entry.path) && <span className="agent-mark" title="Agent changed">●</span>}
         {isDir && (
@@ -397,7 +399,7 @@ function TreeNode({
         )}
       </div>
       {isDir && open && kids && kids.length > 0 && (
-        <div className="tree-children" style={{ ['--guide']: `${indent + 12}px` } as CSSProperties}>
+        <div className="tree-children" style={{ ['--guide']: `${indent + 9}px` } as CSSProperties}>
           {kids.map((child) => (
             <TreeNode
               key={child.path}

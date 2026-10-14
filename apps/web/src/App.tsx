@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Panel, PanelGroup, PanelResizeHandle } from 'react-resizable-panels';
-import type { AgentChange, AgentClientMessage, AgentServerMessage, AgentSessionInfo, AgentStatus, Favorite, FsEntry, FsListResponse, FsReadResponse, FsStatResponse, GitDiffResponse, GitStatusResponse, MachineInfo, Repo, ReposResponse, SessionState, TermClientMessage, TermPlotInfo, TermServerMessage, TermSessionInfo, WatchServerMessage } from '@remotepad/shared';
+import type { AgentChange, AgentClientMessage, AgentServerMessage, AgentSessionInfo, AgentStatus, Favorite, FsEntry, FsListResponse, FsReadResponse, FsStatResponse, GitDiffResponse, GitStatusResponse, MachineInfo, ModulesResponse, Repo, ReposResponse, SessionState, TermClientMessage, TermServerMessage, TermSessionInfo, ViewerEnabledMap, ViewerModuleId, WatchServerMessage } from '@remotepad/shared';
+import { defaultViewerEnabled } from '@remotepad/shared';
 import { api } from './api';
 import { basename, dirname, hasRenderedView, viewerKind } from './files';
 import { prepareRunText } from './runSelection';
-import { browserFileUrl, hasEntryDrag, readEntryDrag } from './dnd';
+import { browserPadUrl, hasEntryDrag, readEntryDrag } from './dnd';
 import { LeftSidebar, type SideTab } from './components/LeftSidebar';
 import { EditorArea, type OpenTab } from './components/EditorArea';
 import { TerminalPanel } from './components/TerminalPanel';
@@ -14,6 +15,10 @@ import { HelpPop, HostPop } from './components/Popovers';
 import type { AgentChatMessage } from './components/AgentPanel';
 
 export function App() {
+  const padPath = typeof location !== 'undefined'
+    ? (new URLSearchParams(location.search).get('pad') || '').trim()
+    : '';
+  const padMode = Boolean(padPath);
   const [treeRoot, setTreeRoot] = useState('/');
   const [machine, setMachine] = useState<MachineInfo | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
@@ -26,7 +31,7 @@ export function App() {
   const [activeTerm, setActiveTerm] = useState<string | null>(null);
   const [git, setGit] = useState<GitStatusResponse | null>(null);
   const [toast, setToast] = useState<string | null>(null);
-  const [termOpen, setTermOpen] = useState(true);
+  const [termOpen, setTermOpen] = useState(!padMode);
   const [favorites, setFavorites] = useState<Favorite[]>([]);
   const [repos, setRepos] = useState<Repo[]>([]);
   const [controlPath, setControlPath] = useState<string | null>(null);
@@ -34,6 +39,9 @@ export function App() {
   const [sideTab, setSideTab] = useState<SideTab>('favorites');
   const [helpOpen, setHelpOpen] = useState(false);
   const [hostOpen, setHostOpen] = useState(false);
+  const [moduleEnabled, setModuleEnabled] = useState<Record<ViewerModuleId, boolean>>(defaultViewerEnabled);
+  const moduleEnabledRef = useRef(moduleEnabled);
+  moduleEnabledRef.current = moduleEnabled;
   const [addressDraft, setAddressDraft] = useState('');
   const [addressFocus, setAddressFocus] = useState(false);
   const addressRef = useRef<HTMLInputElement>(null);
@@ -45,7 +53,6 @@ export function App() {
   const [agentSessionId, setAgentSessionId] = useState<string | undefined>();
   const [agentSessions, setAgentSessions] = useState<AgentSessionInfo[]>([]);
   const [agentWorkingCwd, setAgentWorkingCwd] = useState('');
-  const [termPlots, setTermPlots] = useState<TermPlotInfo[]>([]);
   const [addressDropOver, setAddressDropOver] = useState(false);
 
   const termWs = useRef<WebSocket | null>(null);
@@ -77,6 +84,8 @@ export function App() {
   controlPathRef.current = controlPath;
   const repoPathRef = useRef(repoPath);
   repoPathRef.current = repoPath;
+  const agentSessionIdRef = useRef(agentSessionId);
+  agentSessionIdRef.current = agentSessionId;
   const expandedRef = useRef(expanded);
   expandedRef.current = expanded;
   const sideTabRef = useRef(sideTab);
@@ -97,10 +106,10 @@ export function App() {
     watchPath(dir);
   }, []);
 
-  const restoreTabs = useCallback(async (items: SessionState['tabs'], active: string | null) => {
+  const restoreTabs = useCallback(async (items: SessionState['tabs'], active: string | null, enabled?: ViewerEnabledMap) => {
     const loaded: OpenTab[] = [];
     for (const item of items) {
-      const tab = await readTab(item.path, item.viewMode, item.folder);
+      const tab = await readTab(item.path, item.viewMode, item.folder, enabled);
       if (tab) loaded.push(tab);
     }
     setTabs(loaded);
@@ -122,29 +131,50 @@ export function App() {
     api<MachineInfo>('/api/machine').then(setMachine).catch(() => undefined);
     (async () => {
       try {
-        const [favs, listed, session] = await Promise.all([
+        const [favs, listed, session, modules] = await Promise.all([
           api<{ folders: Favorite[] }>('/api/favorites').catch(() => ({ folders: [] as Favorite[] })),
           api<ReposResponse>('/api/repos').catch(() => ({ repos: [] as Repo[], controlPath: '' })),
           api<SessionState>('/api/session').catch(() => null),
+          api<ModulesResponse>('/api/modules').catch(() => null),
         ]);
         if (cancelled) return;
+        if (modules?.enabled) setModuleEnabled(modules.enabled);
         setFavorites(favs.folders);
         setRepos(listed.repos);
         if (listed.controlPath) setControlPath(listed.controlPath);
-        const tree = session?.treeRoot || '/';
-        const activeRepo = session?.repoPath && listed.repos.some((item) => item.path === session.repoPath)
-          ? session.repoPath
-          : null;
-        setRepoPath(activeRepo);
-        setTreeRoot(tree);
-        setSelected(session?.selected || tree);
-        setSideTab(session?.sideTab === 'repos' ? 'repos' : 'favorites');
-        setTermOpen(session?.termOpen ?? true);
-        const expandedDirs = session?.expanded?.length ? session.expanded : [tree];
-        setExpanded(new Set(expandedDirs));
-        await loadDir(tree);
-        for (const dir of expandedDirs) await loadDir(dir);
-        if (session?.tabs?.length) await restoreTabs(session.tabs, session.activePath);
+        if (padPath) {
+          setTermOpen(false);
+          let kind: 'file' | 'dir' = 'file';
+          try {
+            const st = await api<FsStatResponse>(`/api/fs/stat?path=${encodeURIComponent(padPath)}`);
+            kind = st.kind === 'dir' ? 'dir' : 'file';
+          } catch { /* open as file */ }
+          const dir = kind === 'dir' ? padPath : dirname(padPath);
+          setTreeRoot(dir);
+          setSelected(padPath);
+          setExpanded(new Set([dir]));
+          await loadDir(dir);
+          const tab = await readTab(padPath, undefined, kind === 'dir', modules?.enabled);
+          if (tab) {
+            setTabs([tab]);
+            setActivePath(tab.path);
+          }
+        } else {
+          const tree = session?.treeRoot || '/';
+          const activeRepo = session?.repoPath && listed.repos.some((item) => item.path === session.repoPath)
+            ? session.repoPath
+            : null;
+          setRepoPath(activeRepo);
+          setTreeRoot(tree);
+          setSelected(session?.selected || tree);
+          setSideTab(session?.sideTab === 'repos' ? 'repos' : 'favorites');
+          setTermOpen(session?.termOpen ?? true);
+          const expandedDirs = session?.expanded?.length ? session.expanded : [tree];
+          setExpanded(new Set(expandedDirs));
+          await loadDir(tree);
+          for (const dir of expandedDirs) await loadDir(dir);
+          if (session?.tabs?.length) await restoreTabs(session.tabs, session.activePath, modules?.enabled);
+        }
       } catch (err) {
         if (!cancelled) showToast(String(err instanceof Error ? err.message : err));
         setTreeRoot('/');
@@ -172,6 +202,7 @@ export function App() {
   }), [repoPath, treeRoot, selected, expanded, tabs, activePath, sideTab, termOpen]);
 
   const putSession = (keepalive = false) => {
+    if (padMode) return;
     const body = JSON.stringify({
       repoPath: repoPathRef.current,
       treeRoot: treeRootRef.current,
@@ -235,18 +266,6 @@ export function App() {
       ws.onmessage = (ev) => {
         const msg = JSON.parse(String(ev.data)) as WatchServerMessage;
         if (msg.type === 'open') {
-          if (msg.termId) {
-            setTermPlots((prev) => {
-              const next = prev.filter((item) => item.path !== msg.path);
-              next.push({
-                path: msg.path,
-                title: msg.title || basename(msg.path),
-                termId: msg.termId!,
-                at: Date.now(),
-              });
-              return next;
-            });
-          }
           void openFileRef.current({ name: basename(msg.path), path: msg.path, kind: 'file' }, { reload: true });
           return;
         }
@@ -274,6 +293,7 @@ export function App() {
   }, [loadDir]);
 
   useEffect(() => {
+    if (padMode) return;
     let closed = false;
     let retry: number | undefined;
     const connect = () => {
@@ -329,19 +349,6 @@ export function App() {
         } else if (msg.type === 'closed') {
           setSessions((prev) => prev.filter((item) => item.id !== msg.id));
           setActiveTerm((cur) => (cur === msg.id ? null : cur));
-          setTermPlots((prev) => {
-            const doomed = prev.filter((item) => item.termId === msg.id).map((item) => item.path);
-            if (doomed.length) {
-              setTabs((tabs) => {
-                const rest = tabs.filter((tab) => !doomed.includes(tab.path));
-                if (doomed.includes(activePathRef.current || '')) {
-                  setActivePath(rest[rest.length - 1]?.path || null);
-                }
-                return rest;
-              });
-            }
-            return prev.filter((item) => item.termId !== msg.id);
-          });
           void api('/api/ui/plots/clear', { method: 'POST', body: JSON.stringify({ termId: msg.id }) }).catch(() => undefined);
         } else if (msg.type === 'error') {
           showToast(msg.message);
@@ -361,6 +368,7 @@ export function App() {
   }, []);
 
   useEffect(() => {
+    if (padMode) return;
     let closed = false;
     let retry: number | undefined;
     const connect = () => {
@@ -368,7 +376,11 @@ export function App() {
       agentWs.current = ws;
       ws.onopen = () => {
         const cwd = repoPathRef.current || treeRootRef.current;
-        ws.send(JSON.stringify({ type: 'hello', cwd } satisfies AgentClientMessage));
+        ws.send(JSON.stringify({
+          type: 'hello',
+          cwd,
+          includeHistory: !agentSessionIdRef.current,
+        } satisfies AgentClientMessage));
       };
       ws.onmessage = (ev) => {
         const msg = JSON.parse(String(ev.data)) as AgentServerMessage;
@@ -390,7 +402,11 @@ export function App() {
   useEffect(() => {
     const cwd = repoPath || treeRoot;
     if (agentWs.current?.readyState === WebSocket.OPEN) {
-      agentWs.current.send(JSON.stringify({ type: 'hello', cwd } satisfies AgentClientMessage));
+      agentWs.current.send(JSON.stringify({
+        type: 'hello',
+        cwd,
+        includeHistory: false,
+      } satisfies AgentClientMessage));
     }
   }, [repoPath, treeRoot]);
 
@@ -526,6 +542,32 @@ export function App() {
     }
   };
 
+  const toggleModule = async (id: ViewerModuleId, on: boolean) => {
+    try {
+      const res = await api<ModulesResponse>('/api/modules', {
+        method: 'PUT',
+        body: JSON.stringify({ id, on }),
+      });
+      setModuleEnabled(res.enabled);
+      setTabs((prev) => prev.map((tab) => {
+        if (tab.kind === 'folder' || tab.kind === 'diff' || tab.agentPath) return tab;
+        const kind = viewerKind(tab.path, res.enabled);
+        if (kind === tab.kind) return tab;
+        if (kind === 'image' || kind === 'html') {
+          return { ...tab, kind, viewMode: 'rendered', binary: kind === 'image', mediaRev: Date.now() };
+        }
+        return {
+          ...tab,
+          kind,
+          viewMode: 'source',
+          binary: kind === 'code' ? tab.binary : false,
+        };
+      }));
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : String(err));
+    }
+  };
+
   const openFile = async (entry: FsEntry, opts?: { temp?: boolean; reload?: boolean }) => {
     if (entry.kind === 'dir') {
       await toggleDir(entry.path);
@@ -540,7 +582,7 @@ export function App() {
       setActivePath(entry.path);
       return;
     }
-    const kind = viewerKind(entry.path);
+    const kind = viewerKind(entry.path, moduleEnabledRef.current);
     if (!existing) {
       const tab: OpenTab = {
         path: entry.path,
@@ -559,7 +601,7 @@ export function App() {
           const rest = prev.filter((item) => !item.temp);
           return [tab, ...rest];
         }
-        return [...prev, tab];
+        return [tab, ...prev];
       });
     } else {
       setTabs((prev) => prev.map((tab) => tab.path === entry.path
@@ -625,7 +667,7 @@ export function App() {
       setActivePath(dir);
       return;
     }
-    setTabs((prev) => [...prev, {
+    setTabs((prev) => [{
       path: dir,
       name,
       content: '',
@@ -635,7 +677,7 @@ export function App() {
       dirty: false,
       loading: false,
       kind: 'folder',
-    }]);
+    }, ...prev]);
     setActivePath(dir);
   };
 
@@ -651,6 +693,28 @@ export function App() {
     if (controlPathRef.current && path === controlPathRef.current) void reloadRepos();
   };
 
+  const applyViewMode = useCallback((path: string, mode: OpenTab['viewMode']) => {
+    setTabs((prev) => prev.map((tab) => tab.path === path ? { ...tab, viewMode: mode } : tab));
+    const tab = tabsRef.current.find((item) => item.path === path);
+    if (mode === 'source' && tab?.kind === 'html' && !tab.content && !tab.loading) {
+      void api<FsReadResponse>(`/api/fs/read?path=${encodeURIComponent(path)}`)
+        .then((file) => {
+          setTabs((prev) => prev.map((item) => item.path === path ? {
+            ...item,
+            content: file.binary ? '' : file.content,
+            savedContent: file.binary ? '' : file.content,
+            binary: file.binary,
+          } : item));
+        })
+        .catch((err) => {
+          setTabs((prev) => prev.map((item) => item.path === path ? {
+            ...item,
+            error: err instanceof Error ? err.message : String(err),
+          } : item));
+        });
+    }
+  }, []);
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
@@ -658,18 +722,22 @@ export function App() {
         if (activePathRef.current) void save(activePathRef.current);
       }
       if ((e.ctrlKey || e.metaKey) && e.key === '`') {
+        if (padMode) return;
         e.preventDefault();
         setTermOpen((v) => !v);
       }
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'l') {
         e.preventDefault();
-        addressRef.current?.focus();
-        addressRef.current?.select();
+        e.stopPropagation();
+        const path = activePathRef.current;
+        const tab = path ? tabsRef.current.find((item) => item.path === path) : undefined;
+        if (!tab || !hasRenderedView(tab.kind)) return;
+        applyViewMode(path!, tab.viewMode === 'source' ? 'rendered' : 'source');
       }
     };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, []);
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
+  }, [applyViewMode, padMode]);
 
   useEffect(() => {
     const own = '.tree-body, .side-list, .folder-view, .folder-table, .folder-icons, .menu, .xterm, .xterm-screen, .tabs';
@@ -864,7 +932,7 @@ export function App() {
       kind: 'diff',
       diff: res.diff,
     };
-    setTabs((prev) => [...prev.filter((item) => item.path !== id), tab]);
+    setTabs((prev) => [tab, ...prev.filter((item) => item.path !== id)]);
     setActivePath(id);
   };
 
@@ -917,7 +985,7 @@ export function App() {
       diff: change.diff,
       agentPath: change.path,
     };
-    setTabs((prev) => [...prev.filter((item) => item.path !== id), tab]);
+    setTabs((prev) => [tab, ...prev.filter((item) => item.path !== id)]);
     setActivePath(id);
   };
 
@@ -937,12 +1005,14 @@ export function App() {
 
   handleAgentEventRef.current = (msg) => {
     if (msg.type === 'ready') {
+      const sameSession = Boolean(msg.sessionId && msg.sessionId === agentSessionIdRef.current);
+      agentSessionIdRef.current = msg.sessionId;
       setAgentError(msg.error);
       setAgentSessionId(msg.sessionId);
       if (msg.cwd) setAgentWorkingCwd(msg.cwd);
       if (msg.sessions) setAgentSessions(msg.sessions);
       setAgentChanges(msg.changes);
-      if (msg.history) {
+      if (msg.history && !sameSession) {
         setAgentMessages(msg.history.map((item) => ({
           id: agentMsgId.current++,
           role: item.role,
@@ -971,13 +1041,36 @@ export function App() {
         return [...prev, { id: agentMsgId.current++, role: 'assistant', text: msg.text }];
       });
     } else if (msg.type === 'tool_start') {
-      const detail = msg.input ? compactInput(msg.input) : '';
       setAgentMessages((prev) => [...prev, {
         id: agentMsgId.current++,
         role: 'tool',
         name: msg.name,
-        text: detail,
+        text: '',
+        toolId: msg.id,
+        input: msg.input ? compactInput(msg.input) : '',
       }]);
+    } else if (msg.type === 'tool_end') {
+      const print = msg.result || '';
+      setAgentMessages((prev) => {
+        const next = prev.slice();
+        let idx = -1;
+        for (let i = next.length - 1; i >= 0; i--) {
+          const row = next[i];
+          if (row.role !== 'tool') continue;
+          if (msg.id && row.toolId === msg.id) { idx = i; break; }
+        }
+        if (idx < 0) {
+          for (let i = next.length - 1; i >= 0; i--) {
+            const row = next[i];
+            if (row.role === 'tool' && row.name === msg.name && !row.text) { idx = i; break; }
+          }
+        }
+        if (idx >= 0) {
+          next[idx] = { ...next[idx], text: print };
+          return next;
+        }
+        return [...next, { id: agentMsgId.current++, role: 'tool', name: msg.name, text: print, toolId: msg.id }];
+      });
     } else if (msg.type === 'status') {
       setAgentState(msg.state);
       if (msg.message === 'cleared' || msg.message === 'new') setAgentMessages([]);
@@ -1069,7 +1162,7 @@ export function App() {
               void goToAddressPath(entry.path);
               return;
             }
-            window.open(browserFileUrl(entry.path), '_blank', 'noopener,noreferrer');
+            window.open(browserPadUrl(entry.path), '_blank', 'noopener,noreferrer');
           }}
         >
           {activeRepo && <span className="ws-chip">{activeRepo.name}</span>}
@@ -1078,7 +1171,7 @@ export function App() {
             className="path-input"
             value={addressDraft}
             spellCheck={false}
-            placeholder="Path · drop a file to open in the browser"
+            placeholder="Path · drop a file to open a tree + editor window"
             onFocus={(e) => {
               setAddressFocus(true);
               e.currentTarget.select();
@@ -1097,12 +1190,14 @@ export function App() {
             }}
           />
         </div>
+        {!padMode && (
         <button
           type="button"
           className={`term-toggle ${termOpen ? 'on' : ''}`}
           title={termOpen ? 'Hide terminal (Ctrl/⌘+`)' : 'Show terminal (Ctrl/⌘+`)'}
           onClick={() => setTermOpen((v) => !v)}
         >Terminal</button>
+        )}
         {machine && (
           <button
             type="button"
@@ -1115,7 +1210,7 @@ export function App() {
       </header>
       <div className="shell">
         <PanelGroup direction="horizontal">
-          <Panel defaultSize={22} minSize={14}>
+          <Panel defaultSize={14} minSize={14}>
             <LeftSidebar
               roots={[treeRoot]}
               treeRoot={treeRoot}
@@ -1198,27 +1293,7 @@ export function App() {
                   onRevealInTree={(path) => void revealInTree(path)}
                   onAcceptChange={(path) => sendAgent({ type: 'accept', path })}
                   onUndoChange={(path) => sendAgent({ type: 'undo', path })}
-                  onToggleView={(path, mode) => {
-                    setTabs((prev) => prev.map((tab) => tab.path === path ? { ...tab, viewMode: mode } : tab));
-                    const tab = tabsRef.current.find((item) => item.path === path);
-                    if (mode === 'source' && tab?.kind === 'html' && !tab.content && !tab.loading) {
-                      void api<FsReadResponse>(`/api/fs/read?path=${encodeURIComponent(path)}`)
-                        .then((file) => {
-                          setTabs((prev) => prev.map((item) => item.path === path ? {
-                            ...item,
-                            content: file.binary ? '' : file.content,
-                            savedContent: file.binary ? '' : file.content,
-                            binary: file.binary,
-                          } : item));
-                        })
-                        .catch((err) => {
-                          setTabs((prev) => prev.map((item) => item.path === path ? {
-                            ...item,
-                            error: err instanceof Error ? err.message : String(err),
-                          } : item));
-                        });
-                    }
-                  }}
+                  onToggleView={applyViewMode}
                   listings={listings}
                   favorites={favorites}
                   repos={repos}
@@ -1244,16 +1319,12 @@ export function App() {
                     <TerminalPanel
                       sessions={sessions}
                       activeId={activeTerm}
-                      plots={termPlots}
                       onSelect={setActiveTerm}
                       onCreate={createDefaultTerminal}
                       onRename={(id, name) => sendTerm({ type: 'rename', id, name })}
                       onClose={(id) => sendTerm({ type: 'close', id })}
                       onInput={(id, data) => sendTerm({ type: 'input', id, data })}
                       onResize={(id, cols, rows) => sendTerm({ type: 'resize', id, cols, rows })}
-                      onOpenPlot={(path) => {
-                        void openFile({ name: basename(path), path, kind: 'file' }, { reload: true });
-                      }}
                       onDataRef={termWrite}
                     />
                   </Panel>
@@ -1262,7 +1333,8 @@ export function App() {
             </PanelGroup>
             </div>
           </Panel>
-          <PanelResizeHandle className="resize-handle" />
+          {!padMode && <PanelResizeHandle className="resize-handle" />}
+          {!padMode && (
           <Panel defaultSize={34} minSize={22} maxSize={72}>
             <RightDock
               cwd={agentWorkingCwd || agentCwd}
@@ -1306,6 +1378,7 @@ export function App() {
               }}
             />
           </Panel>
+          )}
         </PanelGroup>
       </div>
       {helpOpen && (
@@ -1322,6 +1395,8 @@ export function App() {
             machine={machine}
             git={git}
             sessions={sessions}
+            modules={moduleEnabled}
+            onToggleModule={(id, on) => void toggleModule(id, on)}
             onOpenDiff={(path) => { setHostOpen(false); void openDiff(path); }}
             onSelectTerm={(id) => {
               setHostOpen(false);
@@ -1409,7 +1484,7 @@ function dirsToExpand(filePath: string, root: string): string[] {
   return out;
 }
 
-async function readTab(filePath: string, viewMode?: OpenTab['viewMode'], folder?: boolean): Promise<OpenTab | null> {
+async function readTab(filePath: string, viewMode?: OpenTab['viewMode'], folder?: boolean, enabled?: ViewerEnabledMap): Promise<OpenTab | null> {
   if (!filePath || filePath.startsWith('diff:') || filePath.startsWith('agent:')) return null;
   if (folder) {
     return {
@@ -1424,7 +1499,7 @@ async function readTab(filePath: string, viewMode?: OpenTab['viewMode'], folder?
       kind: 'folder',
     };
   }
-  const kind = viewerKind(filePath);
+  const kind = viewerKind(filePath, enabled);
   const tab: OpenTab = {
     path: filePath,
     name: basename(filePath),

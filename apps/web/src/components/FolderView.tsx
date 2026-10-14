@@ -1,7 +1,7 @@
 import { useEffect, useState, type MouseEvent } from 'react';
 import type { Favorite, FsEntry, Repo } from '@remotepad/shared';
 import { fileMark } from '../files';
-import { rawUrl } from '../api';
+import { downloadFile } from '../api';
 import { ActionMenu, type MenuItem, type MenuState as BaseMenu } from './ContextMenu';
 
 type FolderMenu = BaseMenu & { paths?: string[] };
@@ -130,13 +130,7 @@ export function FolderView({
   function downloadEntries(list: FsEntry[]) {
     for (const item of list) {
       if (item.kind === 'dir') continue;
-      const a = document.createElement('a');
-      a.href = rawUrl(item.path);
-      a.download = item.name;
-      a.rel = 'noopener';
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
+      downloadFile(item.path, item.name);
     }
   }
 
@@ -165,6 +159,8 @@ export function FolderView({
       setDraftName(entry.name);
     } else if (action === 'delete') {
       setConfirm(targets);
+    } else if (action === 'refresh') {
+      onLoad(dir);
     } else if (action === 'term') {
       onTerminal(folder);
     }
@@ -402,6 +398,7 @@ function ExplorerMenu({
       ...(!isBlank ? [{ type: 'item' as const, id: 'rename', label: 'Rename' }] : []),
       ...(!isBlank ? [{ type: 'item' as const, id: 'delete', label: 'Delete', hint: 'Del', danger: true }] : []),
       { type: 'sep' },
+      { type: 'item', id: 'refresh', label: 'Refresh' },
       { type: 'item', id: 'term', label: 'Open terminal here' },
     ];
 

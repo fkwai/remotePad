@@ -223,15 +223,20 @@ export interface AgentSessionInfo {
   historyPath?: string;
 }
 
-/** Always-on Agent session that edits the RemotePad repo itself. */
+/** Legacy Helper session id. New Helpers are `helper-*`. */
 export const HELPER_SESSION_ID = 'helper';
 
+export function isHelperSessionId(id: string | undefined): boolean {
+  if (!id) return false;
+  return id === HELPER_SESSION_ID || /^helper-[a-z0-9]+$/i.test(id);
+}
+
 export type AgentClientMessage =
-  | { type: 'hello'; cwd: string }
+  | { type: 'hello'; cwd: string; includeHistory?: boolean }
   | { type: 'send'; text: string }
   | { type: 'stop' }
   | { type: 'clear' }
-  | { type: 'new' }
+  | { type: 'new'; helper?: boolean }
   | { type: 'open'; id: string }
   | { type: 'rename'; id: string; title: string }
   | { type: 'delete'; id: string }
@@ -254,8 +259,8 @@ export type AgentServerMessage =
   | { type: 'sessions'; sessions: AgentSessionInfo[] }
   | { type: 'user'; text: string }
   | { type: 'text'; text: string }
-  | { type: 'tool_start'; name: string; input?: unknown }
-  | { type: 'tool_end'; name: string; ok?: boolean }
+  | { type: 'tool_start'; name: string; id?: string; input?: unknown }
+  | { type: 'tool_end'; name: string; id?: string; ok?: boolean; result?: string }
   | { type: 'status'; state: AgentStatus; message?: string }
   | { type: 'changes'; files: AgentChange[]; touched?: string[] }
   | { type: 'error'; message: string };
@@ -270,3 +275,16 @@ export {
   resolveRuntimeSettings,
   type RemotePadSettings,
 } from './settings.ts';
+
+export {
+  VIEWER_MODULE_IDS,
+  VIEWER_MODULES,
+  defaultViewerEnabled,
+  isViewerModuleId,
+  resolveViewerEnabled,
+  type ModulesResponse,
+  type ModulesToggleBody,
+  type ViewerEnabledMap,
+  type ViewerModuleId,
+  type ViewerModuleInfo,
+} from './modules.ts';

@@ -1,4 +1,5 @@
-import type { GitStatusResponse, MachineInfo, TermSessionInfo } from '@remotepad/shared';
+import type { GitStatusResponse, MachineInfo, TermSessionInfo, ViewerModuleId } from '@remotepad/shared';
+import { VIEWER_MODULES } from '@remotepad/shared';
 import { basename } from '../files';
 
 export function InfoPanel({
@@ -6,6 +7,8 @@ export function InfoPanel({
   machine,
   git,
   sessions,
+  modules,
+  onToggleModule,
   onOpenDiff,
   onSelectTerm,
 }: {
@@ -13,6 +16,8 @@ export function InfoPanel({
   machine: MachineInfo | null;
   git: GitStatusResponse | null;
   sessions: TermSessionInfo[];
+  modules?: Record<ViewerModuleId, boolean>;
+  onToggleModule?: (id: ViewerModuleId, on: boolean) => void;
   onOpenDiff: (path: string) => void;
   onSelectTerm: (id: string) => void;
 }) {
@@ -45,6 +50,22 @@ export function InfoPanel({
             ))}
           </>
         )}
+        <h3>Viewer modules</h3>
+        {VIEWER_MODULES.map((mod) => {
+          const on = modules ? modules[mod.id] : mod.defaultOn;
+          return (
+            <button
+              key={mod.id}
+              type="button"
+              className={`mod-row ${on ? 'on' : ''}`}
+              title={mod.hint}
+              onClick={() => onToggleModule?.(mod.id, !on)}
+            >
+              <span className="mod-sw">{on ? 'on' : 'off'}</span>
+              <span className="mod-title">{mod.title}</span>
+            </button>
+          );
+        })}
         <h3>Terminals</h3>
         {sessions.length === 0 && <div className="kv">none</div>}
         {sessions.map((session) => (

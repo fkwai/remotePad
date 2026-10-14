@@ -3,34 +3,29 @@ import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { WebLinksAddon } from '@xterm/addon-web-links';
 import '@xterm/xterm/css/xterm.css';
-import type { TermPlotInfo, TermSessionInfo } from '@remotepad/shared';
+import type { TermSessionInfo } from '@remotepad/shared';
 import { readEntryDrag } from '../dnd';
 import { ActionMenu, type MenuItem } from './ContextMenu';
-import { basename } from '../files';
 
 export function TerminalPanel({
   sessions,
   activeId,
-  plots,
   onSelect,
   onCreate,
   onRename,
   onClose,
   onInput,
   onResize,
-  onOpenPlot,
   onDataRef,
 }: {
   sessions: TermSessionInfo[];
   activeId: string | null;
-  plots: TermPlotInfo[];
   onSelect: (id: string) => void;
   onCreate: () => void;
   onRename: (id: string, name: string) => void;
   onClose: (id: string) => void;
   onInput: (id: string, data: string) => void;
   onResize: (id: string, cols: number, rows: number) => void;
-  onOpenPlot: (path: string) => void;
   onDataRef: React.MutableRefObject<(id: string, data: string) => void>;
 }) {
   const hostRef = useRef<HTMLDivElement | null>(null);
@@ -44,11 +39,6 @@ export function TerminalPanel({
   activeRef.current = activeId;
   onInputRef.current = onInput;
   onResizeRef.current = onResize;
-
-  const activePlots = plots
-    .filter((item) => item.termId === activeId)
-    .slice()
-    .sort((a, b) => b.at - a.at);
 
   useEffect(() => {
     onDataRef.current = (id, data) => {
@@ -70,8 +60,8 @@ export function TerminalPanel({
         fontSize: 13,
         fontFamily: 'ui-monospace, Menlo, Monaco, Consolas, Courier New, monospace',
         theme: {
-          background: '#0b0c0f',
-          foreground: '#e8eaef',
+          background: '#050608',
+          foreground: '#f7f8fb',
           cursor: '#7ee0c5',
           selectionBackground: '#4d7cff88',
           selectionInactiveBackground: '#4d7cff44',
@@ -135,7 +125,7 @@ export function TerminalPanel({
         onResizeRef.current(id, item.term.cols, item.term.rows);
       }
     }
-  }, [activeId, sessions, activePlots.length]);
+  }, [activeId, sessions]);
 
   useEffect(() => {
     const host = hostRef.current;
@@ -229,36 +219,9 @@ export function TerminalPanel({
             if (id) onInputRef.current(id, entry.path);
           }}
         />
-        <aside className={`term-plots ${activePlots.length ? '' : 'empty'}`}>
-          <div className="term-plots-head">Plots</div>
-          {activePlots.length === 0 ? (
-            <div className="term-plots-empty">fig.show() plots from this terminal appear here</div>
-          ) : (
-            <div className="term-plots-list">
-              {activePlots.map((plot) => (
-                <button
-                  type="button"
-                  key={plot.path}
-                  className="term-plot"
-                  title={plot.path}
-                  onClick={() => onOpenPlot(plot.path)}
-                >
-                  <span className="term-plot-title">{plot.title || basename(plot.path)}</span>
-                  <span className="term-plot-time">{formatTime(plot.at)}</span>
-                </button>
-              ))}
-            </div>
-          )}
-        </aside>
       </div>
     </div>
   );
-}
-
-function formatTime(value: number): string {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return '';
-  return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}:${String(date.getSeconds()).padStart(2, '0')}`;
 }
 
 async function writeClipboard(text: string) {

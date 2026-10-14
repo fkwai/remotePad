@@ -23,7 +23,7 @@ export async function registerAgentSocket(app: FastifyInstance) {
         try {
           if (msg.type === 'hello') {
             const cwd = resolveSafe(msg.cwd);
-            await agentHost.hello(cwd);
+            await agentHost.hello(cwd, msg.includeHistory !== false);
           } else if (msg.type === 'send') {
             await agentHost.send(msg.text);
           } else if (msg.type === 'stop') {
@@ -31,7 +31,7 @@ export async function registerAgentSocket(app: FastifyInstance) {
           } else if (msg.type === 'clear') {
             agentHost.clear();
           } else if (msg.type === 'new') {
-            await agentHost.newSession();
+            await agentHost.newSession(Boolean(msg.helper));
           } else if (msg.type === 'open') {
             await agentHost.openSession(msg.id);
           } else if (msg.type === 'rename') {

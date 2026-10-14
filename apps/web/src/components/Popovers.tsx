@@ -1,4 +1,4 @@
-import type { GitStatusResponse, MachineInfo, TermSessionInfo } from '@remotepad/shared';
+import type { GitStatusResponse, MachineInfo, TermSessionInfo, ViewerModuleId } from '@remotepad/shared';
 import { InfoPanel } from './InfoPanel';
 
 export function HelpPop({ onClose }: { onClose: () => void }) {
@@ -16,10 +16,10 @@ export function HelpPop({ onClose }: { onClose: () => void }) {
         </section>
         <section>
           <h3>General</h3>
-          <p><kbd>Ctrl</kbd>/<kbd>⌘</kbd>+<kbd>S</kbd> save · also on the editor tab menu</p>
+          <p><kbd>Ctrl</kbd>/<kbd>⌘</kbd>+<kbd>S</kbd> save · unsaved tabs show <em>●</em> · also on the tab / editor menu</p>
           <p><kbd>Ctrl</kbd>/<kbd>⌘</kbd>+<kbd>`</kbd> show or hide the terminal</p>
-          <p><kbd>Ctrl</kbd>/<kbd>⌘</kbd>+<kbd>L</kbd> focus the address bar · <kbd>Enter</kbd> opens the path</p>
-          <p>Click the computer name for host, git, and terminals</p>
+          <p><kbd>Ctrl</kbd>/<kbd>⌘</kbd>+<kbd>L</kbd> toggle source / rendered · click the address bar to edit the path</p>
+          <p>Click the computer name for host, git, terminals, and viewer modules</p>
         </section>
         <section>
           <h3>Files & Explorer</h3>
@@ -30,7 +30,8 @@ export function HelpPop({ onClose }: { onClose: () => void }) {
         </section>
         <section>
           <h3>Editor</h3>
-          <p>Right-click a tab: reveal in tree, keep, save, close left/right/all</p>
+          <p>Right-click a tab: reveal in tree, keep, save, revert, close left/right/all</p>
+          <p>Viewer files: <kbd>&lt;/&gt;</kbd> or <kbd>Ctrl</kbd>/<kbd>⌘</kbd>+<kbd>L</kbd> toggles source / rendered</p>
           <p><kbd>Shift</kbd>+<kbd>Enter</kbd> or <kbd>Ctrl</kbd>/<kbd>⌘</kbd>+<kbd>Enter</kbd> run the line or selection in the terminal</p>
         </section>
         <section>
@@ -45,7 +46,7 @@ export function HelpPop({ onClose }: { onClose: () => void }) {
         </section>
         <section>
           <h3>Agent</h3>
-          <p><kbd>+</kbd> new session · <kbd>☰</kbd> history · Helper <kbd>New task</kbd> wipes that chat</p>
+          <p><kbd>+</kbd> new general Agent (selected repo) · <kbd>☰</kbd> history · Helper <kbd>Refresh</kbd> wipes that chat (git + AGENTS.md keep the work)</p>
           <p><kbd>Enter</kbd> send · <kbd>Shift</kbd>+<kbd>Enter</kbd> newline</p>
         </section>
       </div>
@@ -58,6 +59,8 @@ export function HostPop({
   machine,
   git,
   sessions,
+  modules,
+  onToggleModule,
   onOpenDiff,
   onSelectTerm,
   onClose,
@@ -66,6 +69,8 @@ export function HostPop({
   machine: MachineInfo | null;
   git: GitStatusResponse | null;
   sessions: TermSessionInfo[];
+  modules?: Record<ViewerModuleId, boolean>;
+  onToggleModule?: (id: ViewerModuleId, on: boolean) => void;
   onOpenDiff: (path: string) => void;
   onSelectTerm: (id: string) => void;
   onClose: () => void;
@@ -81,6 +86,8 @@ export function HostPop({
         machine={machine}
         git={git}
         sessions={sessions}
+        modules={modules}
+        onToggleModule={onToggleModule}
         onOpenDiff={onOpenDiff}
         onSelectTerm={onSelectTerm}
       />

@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import Editor from '@monaco-editor/react';
 import type { OnMount } from '@monaco-editor/react';
 import type { ViewerKind } from '../files';
@@ -102,7 +102,32 @@ export function EditorArea({
   const tab = tabs.find((item) => item.path === activePath) || null;
   const [tabMenu, setTabMenu] = useState<{ x: number; y: number; index: number } | null>(null);
   const [edMenu, setEdMenu] = useState<{ x: number; y: number } | null>(null);
+  const [filesOpen, setFilesOpen] = useState(false);
+  const [overflowing, setOverflowing] = useState(false);
+  const tabsRef = useRef<HTMLDivElement>(null);
+  const measureRef = useRef<HTMLDivElement>(null);
   const edRef = useRef<Parameters<OnMount>[0] | null>(null);
+  const [viewInfo, setViewInfo] = useState<string | null>(null);
+
+  useEffect(() => {
+    setViewInfo(null);
+  }, [tab?.path]);
+
+  useLayoutEffect(() => {
+    const el = tabsRef.current;
+    const measure = measureRef.current;
+    if (!el || !measure) return;
+    const check = () => setOverflowing(measure.scrollWidth > el.clientWidth + 1);
+    check();
+    const ro = new ResizeObserver(check);
+    ro.observe(el);
+    window.addEventListener('resize', check);
+    return () => {
+      ro.disconnect();
+      window.removeEventListener('resize', check);
+    };
+  }, [tabs]);
+
   const menuTab = tabMenu ? tabs[tabMenu.index] : null;
   const revertOk = (path: string, dirty: boolean) => dirty || Boolean(canRevert?.(path));
   const tabMenuItems: MenuItem[] = tabMenu && menuTab ? [
@@ -112,11 +137,22 @@ export function EditorArea({
     ...(menuTab.temp
       ? [{ type: 'item' as const, id: 'keep', label: 'Keep tab open' }]
       : []),
+    ...(hasRenderedView(menuTab.kind)
+      ? [{
+        type: 'item' as const,
+        id: 'source',
+        label: menuTab.viewMode === 'source' ? 'Show rendered' : 'Show source',
+        hint: 'Ctrl/⌘+L',
+      }]
+      : []),
     ...(!menuTab.binary && menuTab.kind !== 'diff' && menuTab.kind !== 'folder'
       ? [
         { type: 'item' as const, id: 'save', label: 'Save', hint: 'Ctrl/⌘+S', disabled: !menuTab.dirty },
         { type: 'item' as const, id: 'revert', label: 'Revert', disabled: !revertOk(menuTab.path, menuTab.dirty) },
       ]
+      : []),
+    ...(menuTab.kind === 'folder'
+      ? [{ type: 'item' as const, id: 'refresh', label: 'Refresh' }]
       : []),
     { type: 'sep' },
     { type: 'item', id: 'close', label: 'Close' },
@@ -127,31 +163,43 @@ export function EditorArea({
 
   return (
     <div className="pane">
-      <div className="tabs">
-        {tabs.map((item, idx) => (
-          <div
-            key={item.path}
-            className={`tab ${item.kind === 'folder' ? 'folder' : ''} ${item.temp ? 'temp' : ''} ${item.path === activePath ? 'active' : ''}`}
-            title={item.temp ? 'Temp tab — right-click to keep, or edit the file' : item.path}
-            draggable={item.kind !== 'diff' && !item.agentPath}
-            onDragStart={(e) => {
-              if (item.kind === 'diff' || item.agentPath) return;
-              setEntryDrag(e, {
-                path: item.path,
-                kind: item.kind === 'folder' ? 'dir' : 'file',
-                name: item.name,
-              });
-            }}
-            onClick={() => onSelect(item.path)}
-            onDoubleClick={() => onRevealInTree(item.path)}
-            onContextMenu={(e) => {
-              e.preventDefault();
-              setTabMenu({ x: e.clientX, y: e.clientY, index: idx });
-            }}
-          >
-            <span className={item.dirty ? 'dirty' : ''}>{item.dirty ? '● ' : ''}{item.name}</span>
-            <button className="ghost close" onClick={(e) => { e.stopPropagation(); onClose(item.path); }} onDoubleClick={(e) => e.stopPropagation()}>×</button>
-          </div>
+      <div className="tabs-bar">
+        <div className="tabs" ref={tabsRef}>
+          {tabs.map((item, idx) => (
+            <div
+              key={item.path}
+              className={`tab ${item.kind === 'folder' ? 'folder' : ''} ${item.temp ? 'temp' : ''} ${item.dirty ? 'unsaved' : ''} ${item.path === activePath ? 'active' : ''}`}
+              title={item.dirty ? `${item.path} · unsaved (Ctrl/⌘+S)` : (item.temp ? 'Temp tab — right-click to keep, or edit the file' : item.path)}
+              draggable={item.kind !== 'diff' && !item.agentPath}
+              onDragStart={(e) => {
+                if (item.kind === 'diff' || item.agentPath) return;
+                setEntryDrag(e, {
+                  path: item.path,
+                  kind: item.kind === 'folder' ? 'dir' : 'file',
+                  name: item.name,
+                });
+              }}
+              onClick={() => onSelect(item.path)}
+              onDoubleClick={() => onRevealInTree(item.path)}
+              onContextMenu={(e) => {
+                e.preventDefault();
+                setTabMenu({ x: e.clientX, y: e.clientY, index: idx });
+              }}
+            >
+              <span className={item.dirty ? 'dirty' : ''}>{item.dirty ? '● ' : ''}{overflowing ? compactTabName(item.name) : item.name}</span>
+              <button className="ghost close" title="Close" aria-label="Close" onClick={(e) => { e.stopPropagation(); onClose(item.path); }} onDoubleClick={(e) => e.stopPropagation()}>×</button>
+            </div>
+          ))}
+        </div>
+        <button
+          className={`ghost files-toggle ${filesOpen ? 'on' : ''}`}
+          onClick={() => setFilesOpen((v) => !v)}
+          title={filesOpen ? 'Hide open files' : 'Show open files'}
+        >Files</button>
+      </div>
+      <div ref={measureRef} className="tabs-measure" aria-hidden="true">
+        {tabs.map((item) => (
+          <div key={item.path} className="tab"><span>{item.name}</span></div>
         ))}
       </div>
       {tabMenu && menuTab && (
@@ -165,8 +213,10 @@ export function EditorArea({
             const idx = tabMenu.index;
             if (id === 'reveal') onRevealInTree(clicked.path);
             else if (id === 'keep') onKeepTab(clicked.path);
+            else if (id === 'source') onToggleView(clicked.path, clicked.viewMode === 'source' ? 'rendered' : 'source');
             else if (id === 'save') onSave(clicked.path);
             else if (id === 'revert') onRevert(clicked.path);
+            else if (id === 'refresh') onLoadDir(clicked.path);
             else if (id === 'close') onClose(clicked.path);
             else if (id === 'close-left') onCloseMany(tabs.slice(0, idx).map((t) => t.path), clicked.path);
             else if (id === 'close-right') onCloseMany(tabs.slice(idx + 1).map((t) => t.path), clicked.path);
@@ -193,7 +243,9 @@ export function EditorArea({
           }}
         />
       )}
-      {tab && (tab.kind === 'folder' || hasRenderedView(tab.kind) || (!tab.binary && tab.kind !== 'diff') || Boolean(tab.agentPath)) && (
+      <div className="editor-main">
+        <div className="editor-col">
+      {tab && (tab.kind === 'folder' || tab.agentPath) && (
         <div className="editor-toolbar">
           {tab.kind === 'folder' && (
             <>
@@ -207,30 +259,6 @@ export function EditorArea({
               <PathCrumbs path={tab.path} onOpen={(dir) => onOpenFolder(tab.path, dir)} />
               <span className="spacer" />
               <button className="ghost" onClick={() => onTerminal(tab.path)}>Terminal</button>
-            </>
-          )}
-          {hasRenderedView(tab.kind) && (
-            <div className="seg">
-              <button className={tab.viewMode === 'rendered' ? 'active' : ''} onClick={() => onToggleView(tab.path, 'rendered')}>Rendered</button>
-              <button className={tab.viewMode === 'source' ? 'active' : ''} onClick={() => onToggleView(tab.path, 'source')}>Source</button>
-            </div>
-          )}
-          {tab.kind !== 'folder' && <span className="spacer" />}
-          {!tab.binary && tab.kind !== 'diff' && tab.kind !== 'folder' && (
-            <>
-              <button
-                className="ghost"
-                disabled={!revertOk(tab.path, tab.dirty)}
-                title="Discard edits and restore last committed / on-disk status"
-                onClick={() => onRevert(tab.path)}
-              >Revert</button>
-              <button
-                className={`primary save-btn ${tab.dirty ? 'dirty' : ''}`}
-                disabled={!tab.dirty}
-                onClick={() => onSave(tab.path)}
-              >
-                {tab.dirty ? 'Save' : 'Saved'}
-              </button>
             </>
           )}
           {tab.agentPath && (
@@ -288,7 +316,7 @@ export function EditorArea({
               />
             )
             : tab.viewMode === 'rendered' && hasRenderedView(tab.kind)
-            ? <Rendered tab={tab} />
+            ? <Rendered tab={tab} onInfo={setViewInfo} />
             : tab.kind === 'diff'
               ? <DiffView diff={tab.diff || ''} path={tab.path} />
               : tab.binary
@@ -350,11 +378,39 @@ export function EditorArea({
                 )
         )}
       </div>
+      {tab && !tab.loading && !tab.error && hasRenderedView(tab.kind) && (
+        <div className="editor-status">
+          <button
+            type="button"
+            className={`status-src ${tab.viewMode === 'source' ? 'on' : ''}`}
+            title={tab.viewMode === 'source' ? 'Show rendered (Ctrl/⌘+L)' : 'Show source (Ctrl/⌘+L)'}
+            onClick={() => onToggleView(tab.path, tab.viewMode === 'source' ? 'rendered' : 'source')}
+          >{'</>'}</button>
+          <span className="status-info">{viewInfo || ''}</span>
+        </div>
+      )}
+        </div>
+        {filesOpen && (
+          <aside className="editor-files-col">
+            <div className="editor-files-panel-head">Open files</div>
+            {tabs.map((item) => (
+              <div
+                key={item.path}
+                className={`editor-files-item ${item.path === activePath ? 'active' : ''}`}
+                title={item.path}
+                onClick={() => onSelect(item.path)}
+              >
+                <span className={item.dirty ? 'dirty' : ''}>{item.dirty ? '● ' : ''}{item.name}</span>
+              </div>
+            ))}
+          </aside>
+        )}
+      </div>
     </div>
   );
 }
 
-function Rendered({ tab }: { tab: OpenTab }) {
+function Rendered({ tab, onInfo }: { tab: OpenTab; onInfo?: (text: string | null) => void }) {
   if (tab.kind === 'markdown') return <MarkdownView content={tab.content} path={tab.path} />;
   if (tab.kind === 'json') {
     const parsed = parseJsonSafe(tab.content);
@@ -362,7 +418,7 @@ function Rendered({ tab }: { tab: OpenTab }) {
   }
   if (tab.kind === 'jsonl') return <JsonlView content={tab.content} />;
   if (tab.kind === 'csv') return <CsvView content={tab.content} path={tab.path} />;
-  if (tab.kind === 'image') return <ImageView path={tab.path} bust={tab.mediaRev} />;
+  if (tab.kind === 'image') return <ImageView path={tab.path} bust={tab.mediaRev} onInfo={onInfo} />;
   if (tab.kind === 'html') return <HtmlView path={tab.path} bust={tab.mediaRev} />;
   if (tab.kind === 'log') return <LogView content={tab.content} />;
   return null;
@@ -374,17 +430,17 @@ function defineTheme(monaco: Parameters<NonNullable<React.ComponentProps<typeof 
     inherit: true,
     rules: [],
     colors: {
-      'editor.background': '#0b0c0f',
-      'editor.foreground': '#e8eaef',
+      'editor.background': '#050608',
+      'editor.foreground': '#f7f8fb',
       'editor.lineHighlightBackground': '#1a2744',
-      'editor.selectionBackground': '#4d7cff88',
-      'editor.inactiveSelectionBackground': '#4d7cff44',
+      'editor.selectionBackground': '#6b94ff99',
+      'editor.inactiveSelectionBackground': '#4d7cff55',
       'editor.selectionHighlightBackground': '#7ee0c540',
       'editor.findMatchBackground': '#e6c07b66',
       'editor.findMatchHighlightBackground': '#e6c07b33',
-      'editorCursor.foreground': '#7ee0c5',
-      'editorLineNumber.foreground': '#5c6474',
-      'editorLineNumber.activeForeground': '#cfe0ff',
+      'editorCursor.foreground': '#8aead0',
+      'editorLineNumber.foreground': '#8b95a6',
+      'editorLineNumber.activeForeground': '#f7f8fb',
     },
   });
 }
@@ -401,6 +457,13 @@ function textForTerminal(ed: Parameters<OnMount>[0]): string {
 function parentOf(filePath: string): string {
   const i = filePath.lastIndexOf('/');
   return i <= 0 ? '/' : filePath.slice(0, i);
+}
+
+function compactTabName(name: string): string {
+  const dot = name.lastIndexOf('.');
+  const stem = dot > 0 ? name.slice(0, dot) : name;
+  if (stem.length <= 8) return stem;
+  return `${stem.slice(0, 4)}…${stem.slice(-4)}`;
 }
 
 function PathCrumbs({ path, onOpen }: { path: string; onOpen: (dir: string) => void }) {

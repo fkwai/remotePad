@@ -1,6 +1,6 @@
-export type ViewerKind = 'markdown' | 'json' | 'jsonl' | 'csv' | 'image' | 'html' | 'log' | 'code' | 'diff' | 'folder';
+import { VIEWER_MODULES, type ViewerEnabledMap, type ViewerModuleId } from '@remotepad/shared';
 
-const IMAGE = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'bmp', 'ico']);
+export type ViewerKind = ViewerModuleId | 'code' | 'diff' | 'folder';
 
 export function extOf(filePath: string): string {
   const base = filePath.split('/').pop() || '';
@@ -8,15 +8,13 @@ export function extOf(filePath: string): string {
   return i >= 0 ? base.slice(i + 1).toLowerCase() : '';
 }
 
-export function viewerKind(filePath: string): ViewerKind {
+export function viewerKind(filePath: string, enabled?: ViewerEnabledMap): ViewerKind {
   const ext = extOf(filePath);
-  if (ext === 'md' || ext === 'markdown') return 'markdown';
-  if (ext === 'json') return 'json';
-  if (ext === 'jsonl' || ext === 'ndjson') return 'jsonl';
-  if (ext === 'csv' || ext === 'tsv') return 'csv';
-  if (IMAGE.has(ext)) return 'image';
-  if (ext === 'html' || ext === 'htm') return 'html';
-  if (ext === 'log' || ext === 'txt') return 'log';
+  for (const mod of VIEWER_MODULES) {
+    if (!mod.extensions.includes(ext)) continue;
+    const on = enabled ? Boolean(enabled[mod.id]) : mod.defaultOn;
+    return on ? mod.id : 'code';
+  }
   return 'code';
 }
 

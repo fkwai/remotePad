@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>filetree playground</title>
+  <style>
+    body { font: 14px/1.4 ui-sans-serif, system-ui; margin: 16px; background: #111; color: #eee; }
+    h1 { font-size: 16px; font-weight: 600; color: #9ad; }
+    .hint { color: #888; font-size: 12px; max-width: 52em; }
+    ul { list-style: none; padding-left: 16px; margin: 0; border-left: 1px solid #333; }
+    li { margin: 2px 0; }
+    button { background: none; border: 0; color: inherit; cursor: pointer; font: inherit; padding: 2px 4px; }
+    button:hover { background: #222; }
+    .dir { color: #8ab4d8; }
+    .file { color: #aaa; }
+    .err { color: #e66; }
+  </style>
+</head>
+<body>
+  <h1>file tree playground</h1>
+  <p class="hint">
+    This page runs in the <b>browser</b>. It cannot see the disk.
+    Click a folder → the browser <code>fetch</code>es <code>/api/list</code> →
+    the <b>Node server</b> (this same port) runs <code>fs.readdir</code> and returns JSON.
+    RemotePad splits that later: page on 5173, API on 3847. Here they are one process.
+  </p>
+  <div id="tree"></div>
+  <script>
+    // --- browser code only. no fs. no disk. ---
+    const tree = document.getElementById('tree');
+
+    async function load(dir) {
+      const res = await fetch('/api/list?path=' + encodeURIComponent(dir));
+      const data = await res.json();
+      if (data.error) throw new Error(data.error);
+      return data;
+    }
+
+    function renderEntry(item) {
+      const li = document.createElement('li');
+      if (item.kind !== 'dir') {
+        li.innerHTML = '<span class="file">' + item.name + '</span>';
+        return li;
+      }
+      const btn = document.createElement('button');
+      btn.className = 'dir';
+      btn.textContent = '> ' + item.name;
+      btn.addEventListener('click', async () => {
+        if (li.dataset.open === '1') {
+          li.dataset.open = '0';
+          btn.textContent = '> ' + item.name;
+          const kids = li.querySelector('ul');
+          if (kids) kids.remove();
+          return;
+        }
+        try {
+          const data = await load(item.path);
+          li.dataset.open = '1';
+          btn.textContent = 'v ' + item.name;
+          const ul = document.createElement('ul');
+          for (const child of data.entries) ul.appendChild(renderEntry(child));
+          li.appendChild(ul);
+        } catch (err) {
+          li.dataset.open = '0';
+          const p = document.createElement('div');
+          p.className = 'err';
+          p.textContent = String(err.message || err);
+          li.appendChild(p);
+        }
+      });
+      li.appendChild(btn);
+      return li;
+    }
+
+    load('/').then((data) => {
+      const ul = document.createElement('ul');
+      ul.style.borderLeft = '0';
+      for (const item of data.entries) ul.appendChild(renderEntry(item));
+      tree.appendChild(ul);
+    }).catch((err) => {
+      tree.innerHTML = '<p class="err">' + err + '</p>';
+    });
+  </script>
+</body>
+</html>

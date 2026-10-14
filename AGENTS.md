@@ -8,7 +8,7 @@ Change RemotePad (layout, Agent panel, workspaces, viewers, terminal) when the u
 
 ## Memory
 
-- This file is the durable product map. Chat JSONL is scratch and will be thrown away (Helper **New task**).
+- This file is the durable product map. Chat JSONL is scratch. Helper **Refresh** wipes the chat; lasting work is already in git and this file.
 - After any UI, layout, or **gesture** change, add or fix a line in this file before you say done.
 - Checkpoint summaries compress older work; keep using them. The latest user message is the job — if a summary retargets the widget, follow the user and this file.
 - After a context checkpoint: re-read this file and the files you will edit.
@@ -24,6 +24,7 @@ Change RemotePad (layout, Agent panel, workspaces, viewers, terminal) when the u
 | editor / Monaco / code | editor **body** | `EditorArea.tsx` Monaco |
 | address bar | path field in the top chrome | `App.tsx` `goToAddress` |
 | Agent / Helper | right dock chat | `AgentPanel.tsx` |
+| pad window | tree + editor only | `App.tsx` `?pad=` |
 
 ## Layout
 
@@ -53,13 +54,14 @@ UI regions (product names): **Sidebar** (left), **Editor** (middle top), **Termi
 | Workspaces / Repos store | `~/.remotepad/workspaces.json` (server routes under `apps/server`) |
 | Favorites | `~/.remotepad/favorites.json` |
 | Host / ports | `settings.json` at install root (`host`, `port`, `uiPort`; env overrides) |
+| Viewer modules | `packages/shared/src/modules.ts` catalog; enabled flags in `~/.remotepad/modules.json`; `GET/PUT /api/modules`; Host pop (computer name) toggles load/unload. Core is always code + folder + diff. Optional: markdown, json, jsonl, csv, image, html, log. Disabled types open as code. New modules should `defaultOn: false`. |
 | UI session restore | `tmp/session.json` under this repo |
 | Shared protocol | `packages/shared/src/index.ts` |
 | Install / LLM path | `apps/server/src/config.ts` (`repoRoot`, `xiaobaPath`) |
 | Plot sample | `samples/plotdemo/plotDemo.py` |
 | Plot plugin | `plugins/plot-show/` (`rpshow` + PYTHONSTARTUP); plots live under `~/.remotepad/plots/<termId>/` and list in the Terminal plots subpanel |
 | Plugin loader | `apps/server/src/plugins.ts` |
-| Drag path MIME | `apps/web/src/dnd.ts` — drop on address bar opens browser tab; drop on Agent compose adds a filename chip |
+| Drag path MIME | `apps/web/src/dnd.ts` — drop on address bar (or the browser URL bar) opens a `?pad=` window with tree + editor that auto-opens the dragged file/dir; `text/plain` and `text/uri-list` both carry the `?pad=` URL so browser address-bar drops navigate to the file, not an empty editor; drop on Agent compose adds a filename chip |
 
 Product docs: `README.md`. This file (`AGENTS.md`) is the helper map — if it disagrees with the tree, update this file.
 
@@ -74,6 +76,7 @@ If a job is about click / double-click / reveal / scroll, read this table first.
 | Surface | Gesture | Behavior |
 | --- | --- | --- |
 | Anywhere (discover) | right-click | Action menu with labels + hints (`ActionMenu` / `ContextMenu.tsx`) |
+| Anywhere | text select | no browser / Edge mini-menu (Copy · Search · Copilot); copy and run live on right-click |
 | File tree folder | single click | select + expand/collapse immediately (same as chevron) |
 | File tree folder | double-click / menu | expand if needed + open Explorer; must not expand-then-fold |
 | File tree chevron | click | expand/collapse only, do not open Explorer |
@@ -84,30 +87,41 @@ If a job is about click / double-click / reveal / scroll, read this table first.
 | Tree `…` | click | go up one folder; keep existing expanded set |
 | Folder / tree menu | Open in new explorer | extra folder tab (italic blue name) |
 | Address bar | Enter | dir → Explorer; file → `revealInTree` |
-| Editor **tab** | right-click | reveal / keep / save / close left·right·all |
+| Editor **tab** | right-click | reveal / keep / save / revert / close left·right·all; folder tab also **Refresh** |
+| Editor **tab** name | unsaved | `●` + accent on the tab (and Files list); no Save/Revert on the top bar — use `Ctrl/⌘+S` or the menu |
+| Editor **tab** | new | Inserts on the left; strip scrolls when full, each name compacts to first4…last4 (extension dropped) |
+| Editor **tab** | Files toggle | Right side of tab strip; opens a right column of the editor (squeezes editor/scrollbar left while open; closed = editor flush right) |
+| Editor **tab** | drag | to Terminal / Agent: insert path; to address bar or a new browser tab: open a tree + editor window (`?pad=`) |
+| Editor **tab** | close × | Far right, small hit; a 14px gap after the name; hover tints only the ×, not the file name |
+| Folder explorer | right-click | **Refresh** reloads this folder listing |
 | Editor **tab** | active | Bright left strip + bottom underline (`.tab.active`) |
 | Terminal panel | default | Open on load; top bar **Terminal** button or `Ctrl/⌘+\`` toggles show/hide |
 | Terminal | plots subpanel | Lists Plotly HTML from this term; closing the term clears its plots |
 | Editor **body** | right-click | Run line/selection · Save (hints Shift+Enter / Ctrl+S) |
 | Editor **body** | Shift+Enter (`.py`) | Dedent selection and wrap in `exec(compile(...))` so REPL `if`/`else` blocks are not broken by blank lines; other languages paste raw |
 | Editor **body** (Monaco) | double-click | word select; not reveal-in-tree |
+| Editor **body** (PNG / HTML) | Ctrl+scroll | Zoom that preview only; does not zoom the browser page |
+| Host pop (computer name) | click | host / git / terminals · **Viewer modules** on/off |
+| Editor **status** bar | `</>` on the left · `Ctrl/⌘+L` | toggle source / rendered for viewer modules; only bar besides the tab strip |
+| Editor **body** (image) | left click | pick a pixel; `x` `y` grey (plus RGB if color) on the same bottom status bar |
+| File tree rows | indent | chevron `>` and file marks share one column at the same depth (files must not sit extra-indented) |
 | Terminal **tab** | right-click | Rename · Close |
 | `revealInTree` | — | `App.tsx`; merge into `expanded`; do not `scrollIntoView` unless the user asks to scroll the row to the top |
 | Folder explorer item | single click | select only (Ctrl/Cmd multi, Shift range); does **not** open |
 | Folder explorer empty | single click | clear selection |
 | Folder explorer item | double-click / menu Open | file → open in Editor; dir → navigate Explorer |
 | Folder explorer selection | right-click menu / Del | Download (files) · Delete |
-| Editor toolbar | Revert | discard dirty buffer; `git restore` to HEAD when in a repo, then reload from disk |
+| Editor tab / body menu | Revert | discard dirty buffer; `git restore` to HEAD when in a repo, then reload from disk |
 | Agent **tab** | right-click | Open session JSONL · Rename · Close |
 | Agent compose | — | pinned at bottom (never clipped); input stays enabled while running |
-| Agent transcript | — | You / Agent roles; collapsible tool rows |
-| Helper | New task | wipe Helper JSONL; this file still injects on the next send |
-| Agent `+` | click | new `rp-*` session (not Helper) |
+| Agent transcript | — | You / Agent roles; tool rows start folded (▸) with live print inside — expand to read output before XiaoBa stubs it in the JSONL; a jump-to-bottom ↓ button appears once you scroll up more than one viewport from the bottom |
+| Helper | Refresh | wipe this Helper chat in place (git + this file keep the work); does not spawn a new helper |
+| Agent `+` | click | new general `rp-*` session (cwd follows the selected repo) |
 
 ## Agent sessions
 
 - Normal sessions: id `rp-*` (or legacy `remotepad`); cwd follows active repo or tree root.
-- This Helper session: id `helper`; cwd is always `repoRoot`; do not delete it.
+- Helper sessions: id `helper` (legacy) or `helper-*`; cwd is always `repoRoot`. **Refresh** wipes the current Helper chat. Close / delete like any other session. Clicking a Repos row updates `rp-*` cwd only — it does not reload Helper (or any open) chat.
 - Session JSONL: `~/.remotepad/xiaoba/data/sessions/{id}.jsonl`
 - Active id / titles: `~/.remotepad/agent-active.json`
 

@@ -183,7 +183,7 @@ The file tree starts at `/`. Allowed paths include `/` plus `$HOME`, the process
 Click **RemotePad** in the top-left for the full help list. Common shortcuts (also shown on menus):
 
 - `Ctrl/Cmd+S` save
-- `Ctrl/Cmd+L` address bar · `Enter` opens the path
+- `Ctrl/Cmd+L` source / rendered · click the address bar, `Enter` opens the path
 - `Ctrl+`` toggle terminal
 - `Shift+Enter` / `Ctrl/Cmd+Enter` run line or selection in the terminal
 - Click a file to temp-open; right-click the file or tab → **Keep tab open**
@@ -256,9 +256,9 @@ The right dock defaults to **Agent**. It embeds the XiaoBa runtime from `REMOTEP
 
 Each Agent conversation is a XiaoBa session. The live transcript is stored as JSONL at `~/.remotepad/xiaoba/data/sessions/{id}.jsonl`, with extra runtime state in `~/.remotepad/xiaoba/data/session-state/{id}.json`. The active session id and custom titles are in `~/.remotepad/agent-active.json`. Reloading the page restores the active session into both the model context and the chat panel.
 
-The Agent panel is a full-height right dock. Open sessions appear as **tabs** along the top. **+** starts a new session without deleting the others. **☰** opens history to switch, rename, or delete any session. Closing a tab hides it from the strip; the JSONL stays on disk until you Delete. Changed files show as a compact list at the bottom of the panel (`M path +n −n`) with Keep/Undo; click a row for the full diff. Host / git / terminals open from the computer name in the top-right.
+The Agent panel is a full-height right dock. Open sessions appear as **tabs** along the top. **+** starts a new session without deleting the others. **☰** opens history to switch, rename, or delete any session. Closing a tab hides it from the strip; the JSONL stays on disk until you Delete. Changed files show as a compact list at the bottom of the panel (`M path +n −n`) with Keep/Undo; click a row for the full diff. Host / git / terminals / viewer modules open from the computer name in the top-right. Each file-type preview (image, markdown, HTML, JSON, CSV, log) is an optional module; turn it off there (or in `~/.remotepad/modules.json`) and those files open as code.
 
-**Helper** is a pinned session (`helper`) that always stays in the tab strip. Its working directory is fixed to this install root (`repoRoot`), independent of the Sidebar tree or active Repos selection. It loads `AGENTS.md` into the system prompt so you can ask it to modify RemotePad itself. Chat history is scratch; lasting layout and gesture rules belong in `AGENTS.md`. Helper cannot be closed or deleted. **New task** (same as Clear) wipes the Helper JSONL; the next send still injects the brief. XiaoBa may summarize older turns; the host appends the latest user message verbatim so that remains the job.
+**Helper** sessions (`helper` or `helper-*`) edit this install. Working directory is always `repoRoot`, independent of the Sidebar tree or Repos selection. Each Helper loads `AGENTS.md` into the system prompt. Chat JSONL is scratch; lasting layout and gesture rules belong in `AGENTS.md`. **Refresh** wipes the current Helper chat — the work is already in git and `AGENTS.md`. **+** starts a **general Agent** (`rp-*`) whose cwd follows the selected repo. Close or delete a session like any other. XiaoBa may summarize older turns; the host appends the latest user message verbatim so that remains the job.
 
 Requirements:
 

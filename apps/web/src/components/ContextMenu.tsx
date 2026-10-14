@@ -105,6 +105,7 @@ export function ContextMenu({
         { type: 'item' as const, id: 'open-keep', label: 'Keep tab open', hint: 'Dbl-click' },
       ]),
     { type: 'item', id: 'copy-path', label: 'Copy full path' },
+    ...(isDir ? [] : [{ type: 'item' as const, id: 'download', label: 'Download' }]),
     { type: 'sep' },
     ...(isDir
       ? [

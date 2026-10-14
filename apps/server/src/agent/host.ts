@@ -4,7 +4,7 @@ import path from 'node:path';
 import { createRequire } from 'node:module';
 import { execFileSync } from 'node:child_process';
 import type { AgentChange, AgentHistoryItem, AgentServerMessage, AgentSessionInfo, AgentStatus } from '@remotepad/shared';
-import { HELPER_SESSION_ID } from '@remotepad/shared';
+import { isHelperSessionId } from '@remotepad/shared';
 import { config } from '../config.ts';
 import { ChangeTracker } from './changes.ts';
 
@@ -117,17 +117,37 @@ function newSessionId(): string {
   return `rp-${Date.now().toString(36)}`;
 }
 
+function newHelperId(): string {
+  return `helper-${Date.now().toString(36)}`;
+}
+
 function isSessionId(id: string): boolean {
-  return id === HELPER_SESSION_ID || id === 'remotepad' || /^rp-[a-z0-9]+$/i.test(id);
+  return id === 'remotepad' || isHelperSessionId(id) || /^rp-[a-z0-9]+$/i.test(id);
 }
 
 function isHelperSession(id: string): boolean {
-  return id === HELPER_SESSION_ID;
+  return isHelperSessionId(id);
+}
+
+function listHelperIdsOnDisk(): string[] {
+  const dir = path.join(config.xiaobaDataDir, 'data', 'sessions');
+  if (!fs.existsSync(dir)) return [];
+  return fs.readdirSync(dir)
+    .filter((name) => name.endsWith('.jsonl'))
+    .map((name) => name.slice(0, -'.jsonl'.length))
+    .filter((id) => isHelperSession(id));
 }
 
 function ensureHelperMeta(meta = readMeta()): SessionMeta {
-  if (!meta.ids.includes(HELPER_SESSION_ID)) meta.ids.unshift(HELPER_SESSION_ID);
-  if (!meta.titles[HELPER_SESSION_ID]) meta.titles[HELPER_SESSION_ID] = 'Helper';
+  const helpers = [...new Set([...meta.ids.filter(isHelperSession), ...listHelperIdsOnDisk()])];
+  if (helpers.length === 0) {
+    const id = isHelperSession(meta.id) ? meta.id : newHelperId();
+    if (!meta.ids.includes(id)) meta.ids.unshift(id);
+  } else {
+    for (const id of helpers) {
+      if (!meta.ids.includes(id)) meta.ids.push(id);
+    }
+  }
   writeMeta(meta);
   return meta;
 }
@@ -167,9 +187,10 @@ function composeHelperPrompt(base: string, latestUser: string): string {
   const status = helperGitSnapshot();
   const latest = latestUser.trim();
   const parts = [
+    '## Language\n\nReply in English. The user writes in English; always respond in English unless the user writes in another language. Do not reply in Chinese.',
     base.trim(),
     brief ? `## RemotePad helper brief\n\n${brief}` : '## RemotePad helper brief\n\nYou edit only the RemotePad repo at the fixed cwd.',
-    `## Helper process\n\nAGENTS.md is the product map. Chat JSONL is scratch (New task wipes it).\nXiaoBa summaries are fine for older work. The latest user message is the current job — if a summary disagrees about what to change, follow that message and AGENTS.md.`,
+    `## Helper process\n\nAGENTS.md is the product map. Chat JSONL is scratch. Refresh wipes this Helper chat; lasting work already lives in git and AGENTS.md.\nXiaoBa summaries are fine for older work. The latest user message is the current job — if a summary disagrees about what to change, follow that message and AGENTS.md.`,
     latest ? `## Latest user message (verbatim)\n\n${latest}` : '',
     `## Live repo status\n\nRepo: ${config.repoRoot}\n\`\`\`\n${status}\n\`\`\``,
   ];
@@ -202,11 +223,9 @@ function readMeta(): SessionMeta {
     }
     const ids = Array.isArray(raw.ids) ? raw.ids.filter((item) => typeof item === 'string' && isSessionId(item)) : [];
     if (id && !ids.includes(id)) ids.push(id);
-    if (!ids.includes(HELPER_SESSION_ID)) ids.unshift(HELPER_SESSION_ID);
-    if (!titles[HELPER_SESSION_ID]) titles[HELPER_SESSION_ID] = 'Helper';
     return { id, titles, ids };
   } catch {
-    return { id: '', titles: { [HELPER_SESSION_ID]: 'Helper' }, ids: [HELPER_SESSION_ID] };
+    return { id: '', titles: {}, ids: [] };
   }
 }
 
@@ -227,8 +246,10 @@ function readActiveSessionId(): string {
     writeActiveSessionId('remotepad');
     return 'remotepad';
   }
-  writeActiveSessionId(HELPER_SESSION_ID);
-  return HELPER_SESSION_ID;
+  const helpers = listHelperIdsOnDisk();
+  const fallback = helpers[0] || newHelperId();
+  writeActiveSessionId(fallback);
+  return fallback;
 }
 
 function writeActiveSessionId(id: string): void {
@@ -265,7 +286,18 @@ function contentText(content: unknown): string {
   return '';
 }
 
-function readHistory(sessionId: string): AgentHistoryItem[] {
+const TOOL_PRINT_MAX = 24_000;
+
+function isStubbedToolPrint(text: string): boolean {
+  return /历史工具结果已省略|历史输出已省略/.test(text);
+}
+
+function clipToolPrint(text: string, max = TOOL_PRINT_MAX): string {
+  if (text.length <= max) return text;
+  return `${text.slice(0, max)}\n…[truncated ${text.length} chars]`;
+}
+
+function readHistory(sessionId: string, prints?: Map<string, string>): AgentHistoryItem[] {
   const fp = sessionFile(sessionId);
   if (!fs.existsSync(fp)) return [];
   const items: AgentHistoryItem[] = [];
@@ -277,6 +309,7 @@ function readHistory(sessionId: string): AgentHistoryItem[] {
         role?: string;
         content?: unknown;
         name?: string;
+        tool_call_id?: string;
         tool_calls?: { name?: string }[];
       };
       if (msg.role === 'system') continue;
@@ -286,11 +319,11 @@ function readHistory(sessionId: string): AgentHistoryItem[] {
         items.push({ role: 'user', text });
       } else if (msg.role === 'assistant') {
         if (text.trim()) items.push({ role: 'assistant', text });
-        for (const call of msg.tool_calls || []) {
-          if (call.name) items.push({ role: 'tool', name: call.name, text: '' });
-        }
       } else if (msg.role === 'tool') {
-        items.push({ role: 'tool', name: msg.name, text: text.slice(0, 800) });
+        const id = typeof msg.tool_call_id === 'string' ? msg.tool_call_id : '';
+        const live = id ? prints?.get(`${sessionId}\0${id}`) : undefined;
+        const body = live || (isStubbedToolPrint(text) ? '' : text);
+        items.push({ role: 'tool', name: msg.name, text: clipToolPrint(body, 8000) });
       }
     } catch {
       // skip bad line
@@ -328,19 +361,19 @@ function sessionInfo(sessionId: string, customTitle?: string): AgentSessionInfo 
       }
     }
   }
-  const pinned = isHelperSession(sessionId);
+  const named = customTitle && customTitle !== 'Helper' ? customTitle : '';
+  const title = isHelperSession(sessionId) ? 'Helper' : (named || firstUser || 'New session');
   return {
     id: sessionId,
-    title: clip(customTitle || (pinned ? 'Helper' : firstUser) || 'New session', 60),
+    title: clip(title, 60),
     preview: clip(lastText, 80),
     updatedAt,
-    pinned: pinned || undefined,
     historyPath: fp,
   };
 }
 
 function listSessions(currentId: string): AgentSessionInfo[] {
-  const ids = new Set<string>([HELPER_SESSION_ID]);
+  const ids = new Set<string>();
   const dir = path.join(config.xiaobaDataDir, 'data', 'sessions');
   if (fs.existsSync(dir)) {
     for (const name of fs.readdirSync(dir)) {
@@ -350,13 +383,16 @@ function listSessions(currentId: string): AgentSessionInfo[] {
     }
   }
   if (currentId && isSessionId(currentId)) ids.add(currentId);
-  for (const id of readMeta().ids) ids.add(id);
+  for (const id of readMeta().ids) {
+    if (isSessionId(id) && (id === currentId || fs.existsSync(sessionFile(id)))) ids.add(id);
+  }
   const titles = readMeta().titles;
   return [...ids]
     .map((id) => sessionInfo(id, titles[id]))
     .sort((a, b) => {
-      if (a.id === HELPER_SESSION_ID) return -1;
-      if (b.id === HELPER_SESSION_ID) return 1;
+      const ah = isHelperSession(a.id) ? 0 : 1;
+      const bh = isHelperSession(b.id) ? 0 : 1;
+      if (ah !== bh) return ah - bh;
       return b.updatedAt - a.updatedAt;
     });
 }
@@ -417,6 +453,8 @@ export class AgentHost {
   private helperLastUser = '';
   readonly tracker = new ChangeTracker();
   private sending = false;
+  /** Live tool prints, keyed by `${sessionId}\\0${toolCallId}`, kept until that session is deleted. */
+  private toolPrint = new Map<string, string>();
 
   subscribe(fn: Listener): () => void {
     this.listeners.add(fn);
@@ -454,7 +492,7 @@ export class AgentHost {
       model: this.model || undefined,
       error: this.error,
       sessionId: this.sessionId || undefined,
-      history: includeHistory && this.sessionId ? readHistory(this.sessionId) : undefined,
+      history: includeHistory && this.sessionId ? readHistory(this.sessionId, this.toolPrint) : undefined,
       sessions: listSessions(this.sessionId),
       changes: this.tracker.list(),
     });
@@ -489,13 +527,13 @@ export class AgentHost {
     });
   }
 
-  async hello(cwd: string): Promise<void> {
+  async hello(cwd: string, includeHistory = true): Promise<void> {
     try {
       this.uiCwd = path.resolve(cwd || process.cwd());
       ensureHelperMeta();
       if (!this.sessionId) this.sessionId = readActiveSessionId();
       await this.ensureSession(this.resolveCwd());
-      this.emitReady();
+      this.emitReady(this.resolveCwd(), includeHistory);
       this.emit({ type: 'status', state: this.status });
     } catch (err) {
       this.error = err instanceof Error ? err.message : String(err);
@@ -577,14 +615,18 @@ export class AgentHost {
             this.emit({ type: 'text', text: chunk });
           }
         },
-        onToolStart: async (name: string, _id: string, input: unknown) => {
-          this.emit({ type: 'tool_start', name, input });
+        onToolStart: async (name: string, id: string, input: unknown) => {
+          this.emit({ type: 'tool_start', name, id, input });
           if (fileTools.has(name)) {
             lastWrite = toolPath(input as Record<string, unknown>, cwd);
           }
         },
-        onToolEnd: async (name: string) => {
-          this.emit({ type: 'tool_end', name, ok: true });
+        onToolEnd: async (name: string, id: string, result: string) => {
+          const print = clipToolPrint(typeof result === 'string' ? result : '');
+          if (id && print && !isStubbedToolPrint(print)) {
+            this.toolPrint.set(`${this.sessionId}\0${id}`, print);
+          }
+          this.emit({ type: 'tool_end', name, id, ok: true, result: print });
           if (fileTools.has(name) && lastWrite) {
             await this.tracker.refresh(lastWrite);
             this.emitChanges([lastWrite]);
@@ -649,8 +691,9 @@ export class AgentHost {
     this.emitReady();
   }
 
-  async newSession(): Promise<void> {
-    await this.switchTo(newSessionId(), false);
+  async newSession(helper = false): Promise<void> {
+    if (helper) this.helperLastUser = '';
+    await this.switchTo(helper ? newHelperId() : newSessionId(), false);
     this.emit({ type: 'status', state: 'idle', message: 'new' });
   }
 
@@ -665,17 +708,13 @@ export class AgentHost {
   }
 
   renameSession(id: string, title: string): void {
-    if (!isSessionId(id) || isHelperSession(id)) return;
+    if (!isSessionId(id)) return;
     setSessionTitle(id, title);
     this.emitSessions();
   }
 
   async deleteSession(id: string): Promise<void> {
     if (!isSessionId(id)) return;
-    if (isHelperSession(id)) {
-      this.emit({ type: 'error', message: 'Helper session cannot be deleted.' });
-      return;
-    }
     const wasCurrent = id === this.sessionId;
     if (wasCurrent) {
       this.bundle?.session.requestInterrupt();
@@ -684,6 +723,7 @@ export class AgentHost {
       this.bundle = null;
       this.envStamp = '';
     }
+    this.forgetToolPrints(id);
     unlinkSessionFiles(id);
     const meta = readMeta();
     delete meta.titles[id];
@@ -694,13 +734,21 @@ export class AgentHost {
       return;
     }
     const rest = listSessions('').filter((item) => item.id !== id);
-    const next = rest[0]?.id || HELPER_SESSION_ID;
-    await this.switchTo(next, Boolean(rest[0]) || isHelperSession(next));
+    const next = rest.find((item) => isHelperSession(item.id))?.id || rest[0]?.id || newHelperId();
+    await this.switchTo(next, rest.some((item) => item.id === next));
     this.emit({ type: 'status', state: 'idle', message: 'open' });
+  }
+
+  private forgetToolPrints(sessionId: string): void {
+    const prefix = `${sessionId}\0`;
+    for (const key of [...this.toolPrint.keys()]) {
+      if (key.startsWith(prefix)) this.toolPrint.delete(key);
+    }
   }
 
   clear(): void {
     if (isHelperSession(this.sessionId)) this.helperLastUser = '';
+    this.forgetToolPrints(this.sessionId);
     this.bundle?.session.requestInterrupt();
     if (this.bundle?.session.clear) this.bundle.session.clear();
     else this.bundle?.session.reset();

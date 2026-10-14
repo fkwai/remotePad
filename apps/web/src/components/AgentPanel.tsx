@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { AgentChange, AgentSessionInfo, AgentStatus } from '@remotepad/shared';
-import { HELPER_SESSION_ID } from '@remotepad/shared';
+import { isHelperSessionId } from '@remotepad/shared';
 import { basename } from '../files';
 import { readEntryDrag, hasEntryDrag } from '../dnd';
 import { ActionMenu, type MenuItem } from './ContextMenu';
@@ -10,6 +10,8 @@ export type AgentChatMessage = {
   role: 'user' | 'assistant' | 'tool' | 'status';
   text: string;
   name?: string;
+  toolId?: string;
+  input?: string;
 };
 
 export function AgentPanel({
@@ -61,52 +63,67 @@ export function AgentPanel({
   const [renaming, setRenaming] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState('');
   const [historyOpen, setHistoryOpen] = useState(false);
-  const [openIds, setOpenIds] = useState<string[]>([HELPER_SESSION_ID]);
+  const [openIds, setOpenIds] = useState<string[]>([]);
   const [chips, setChips] = useState<{ path: string; name: string }[]>([]);
   const [tabMenu, setTabMenu] = useState<{ x: number; y: number; id: string } | null>(null);
-  const [collapsedTools, setCollapsedTools] = useState<Set<number>>(new Set());
+  const [openTools, setOpenTools] = useState<Set<number>>(new Set());
+  const [showJump, setShowJump] = useState(false);
   const busy = state === 'running';
-  const helperActive = sessionId === HELPER_SESSION_ID;
+  const helperActive = isHelperSessionId(sessionId);
 
   useEffect(() => {
     const node = logRef.current;
     if (!node) return;
     const nearBottom = node.scrollHeight - node.scrollTop - node.clientHeight < 80;
     if (nearBottom) node.scrollTop = node.scrollHeight;
+    const away = node.scrollHeight - node.scrollTop - node.clientHeight;
+    setShowJump(away > node.clientHeight);
   }, [messages]);
 
   useEffect(() => {
-    setOpenIds((prev) => {
-      let next = prev.includes(HELPER_SESSION_ID) ? prev : [HELPER_SESSION_ID, ...prev];
-      if (sessionId && !next.includes(sessionId)) next = [...next, sessionId];
-      return next.length === prev.length && next.every((id, i) => id === prev[i]) ? prev : next;
-    });
-  }, [sessionId]);
+    const node = logRef.current;
+    if (!node) return;
+    const onScroll = () => {
+      const away = node.scrollHeight - node.scrollTop - node.clientHeight;
+      setShowJump(away > node.clientHeight);
+    };
+    onScroll();
+    node.addEventListener('scroll', onScroll, { passive: true });
+    const ro = new ResizeObserver(onScroll);
+    ro.observe(node);
+    return () => {
+      node.removeEventListener('scroll', onScroll);
+      ro.disconnect();
+    };
+  }, []);
 
   useEffect(() => {
     const known = new Set(sessions.map((item) => item.id));
     setOpenIds((prev) => {
-      const next = prev.filter((id) => id === HELPER_SESSION_ID || known.has(id) || id === sessionId);
-      if (!next.includes(HELPER_SESSION_ID)) next.unshift(HELPER_SESSION_ID);
+      let next = prev.filter((id) => known.has(id) || id === sessionId);
+      if (sessionId && !next.includes(sessionId)) next = [...next, sessionId];
+      if (!next.some(isHelperSessionId)) {
+        const helper = sessions.filter((item) => isHelperSessionId(item.id))
+          .sort((a, b) => b.updatedAt - a.updatedAt)[0];
+        if (helper) next = [helper.id, ...next];
+      }
       return next.length === prev.length && next.every((id, i) => id === prev[i]) ? prev : next;
     });
   }, [sessions, sessionId]);
 
   useEffect(() => {
-    setCollapsedTools(new Set());
+    setOpenTools(new Set());
   }, [sessionId]);
 
   const openTabs = useMemo(() => {
     const byId = new Map(sessions.map((item) => [item.id, item]));
     const tabs = openIds
-      .map((id) => byId.get(id) || (id === HELPER_SESSION_ID
-        ? { id: HELPER_SESSION_ID, title: 'Helper', preview: '', updatedAt: Date.now(), pinned: true }
-        : undefined))
+      .map((id) => byId.get(id))
       .filter((item): item is AgentSessionInfo => Boolean(item));
     tabs.sort((a, b) => {
-      if (a.id === HELPER_SESSION_ID) return -1;
-      if (b.id === HELPER_SESSION_ID) return 1;
-      return 0;
+      const ah = isHelperSessionId(a.id) ? 0 : 1;
+      const bh = isHelperSessionId(b.id) ? 0 : 1;
+      return ah - bh;
     });
     return tabs;
   }, [openIds, sessions]);
@@ -124,6 +141,11 @@ export function AgentPanel({
     setChips((prev) => prev.some((item) => item.path === path) ? prev : [...prev, { path, name: label }]);
   }
 
+  function jumpToBottom() {
+    const node = logRef.current;
+    if (node) node.scrollTo({ top: node.scrollHeight, behavior: 'smooth' });
+  }
+
   function submit() {
     const text = inputRef.current?.value ?? '';
     const chipBlock = chips.map((item) => item.path).join('\n');
@@ -136,7 +158,7 @@ export function AgentPanel({
   }
 
   function commitRename() {
-    if (!renaming || renaming === HELPER_SESSION_ID) {
+    if (!renaming) {
       setRenaming(null);
       return;
     }
@@ -146,13 +168,16 @@ export function AgentPanel({
   }
 
   function closeTab(id: string) {
-    if (id === HELPER_SESSION_ID) return;
-    const next = openIds.filter((item) => item !== id);
-    if (!next.includes(HELPER_SESSION_ID)) next.unshift(HELPER_SESSION_ID);
-    setOpenIds(next);
+    const remaining = openIds.filter((item) => item !== id);
+    setOpenIds(remaining);
     if (id !== sessionId) return;
-    const fallback = next.filter((item) => item !== id).at(-1) || HELPER_SESSION_ID;
-    onOpen(fallback);
+    const helperTab = remaining.find(isHelperSessionId);
+    if (helperTab) {
+      onOpen(helperTab);
+      return;
+    }
+    const fallback = remaining.at(-1);
+    if (fallback) onOpen(fallback);
   }
 
   function openFromHistory(id: string) {
@@ -167,13 +192,9 @@ export function AgentPanel({
   const menuSession = tabMenu ? openTabs.find((item) => item.id === tabMenu.id) : null;
   const tabMenuItems: MenuItem[] = tabMenu && menuSession ? [
     { type: 'item', id: 'open-jsonl', label: 'Open session JSONL', disabled: !sessionJsonlPath(menuSession.id) },
-    ...(menuSession.id !== HELPER_SESSION_ID
-      ? [
-        { type: 'item' as const, id: 'rename', label: 'Rename' },
-        { type: 'sep' as const },
-        { type: 'item' as const, id: 'close', label: 'Close tab' },
-      ]
-      : []),
+    { type: 'item', id: 'rename', label: 'Rename' },
+    { type: 'sep' },
+    { type: 'item', id: 'close', label: 'Close tab' },
   ] : [];
 
   return (
@@ -183,25 +204,23 @@ export function AgentPanel({
           {openTabs.map((item) => (
             <div
               key={item.id}
-              className={`agent-tab ${item.id === sessionId ? 'active' : ''} ${item.id === HELPER_SESSION_ID ? 'pinned' : ''}`}
+              className={`agent-tab ${item.id === sessionId ? 'active' : ''} ${isHelperSessionId(item.id) ? 'helper' : ''}`}
               onClick={() => { if (item.id !== sessionId) onOpen(item.id); }}
               onContextMenu={(e) => {
                 e.preventDefault();
                 setTabMenu({ x: e.clientX, y: e.clientY, id: item.id });
               }}
-              title={item.id === HELPER_SESSION_ID ? `${item.title} · ${cwd}` : item.title}
+              title={isHelperSessionId(item.id) ? item.title + ' · ' + cwd : item.title}
             >
               <span className="agent-tab-title">{item.title}</span>
-              {item.id !== HELPER_SESSION_ID && (
-                <button
-                  className="ghost close"
-                  onClick={(e) => { e.stopPropagation(); closeTab(item.id); }}
-                >×</button>
-              )}
+              <button
+                className="ghost close"
+                onClick={(e) => { e.stopPropagation(); closeTab(item.id); }}
+              >×</button>
             </div>
           ))}
         </div>
-        <button className="ghost agent-chrome-btn" onClick={onNew} title="New session" aria-label="New session">+</button>
+        <button className="ghost agent-chrome-btn" onClick={onNew} title="New Agent — works in the selected repo" aria-label="New Agent">+</button>
         <button
           className={`ghost agent-chrome-btn ${historyOpen ? 'on' : ''}`}
           onClick={() => setHistoryOpen((v) => !v)}
@@ -254,7 +273,6 @@ export function AgentPanel({
                 className={`agent-session ${item.id === sessionId ? 'active' : ''}`}
                 onClick={() => openFromHistory(item.id)}
                 onDoubleClick={(e) => {
-                  if (item.id === HELPER_SESSION_ID) return;
                   e.stopPropagation();
                   setRenaming(item.id);
                   setRenameValue(item.title);
@@ -279,7 +297,10 @@ export function AgentPanel({
                       onBlur={commitRename}
                     />
                   ) : (
-                    <span className="agent-session-title" title={item.id}>{item.title}</span>
+                    <span className="agent-session-title" title={item.id}>
+                      <span className="agent-session-kind">{isHelperSessionId(item.id) ? 'Helper' : 'Agent'}</span>
+                      {item.title}
+                    </span>
                   )}
                   <span className="agent-session-time">{formatTime(item.updatedAt)}</span>
                 </div>
@@ -296,29 +317,23 @@ export function AgentPanel({
                       }}
                     >JSONL</button>
                   )}
-                  {item.id !== HELPER_SESSION_ID && (
-                    <button
-                      className="ghost"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setRenaming(item.id);
-                        setRenameValue(item.title);
-                      }}
-                    >Rename</button>
-                  )}
-                  {item.id === HELPER_SESSION_ID ? (
-                    <span className="agent-session-pinned">Pinned</span>
-                  ) : (
-                    <button
-                      className="danger"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        if (window.confirm(`Delete session “${item.title}”? This removes its saved history.`)) {
-                          onDelete(item.id);
-                        }
-                      }}
-                    >Delete</button>
-                  )}
+                  <button
+                    className="ghost"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setRenaming(item.id);
+                      setRenameValue(item.title);
+                    }}
+                  >Rename</button>
+                  <button
+                    className="danger"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (window.confirm('Delete session ' + item.title + '? This removes its saved history.')) {
+                        onDelete(item.id);
+                      }
+                    }}
+                  >Delete</button>
                 </div>
               </div>
             ))}
@@ -326,14 +341,15 @@ export function AgentPanel({
         </div>
       )}
       {error && <div className="agent-banner">{error}</div>}
-      <div className="agent-log" ref={logRef}>
-        {messages.length === 0 && !error && (
-          <div className="agent-empty">
-            {helperActive
-              ? 'Ask Helper to change RemotePad. Chat is scratch; lasting layout and gesture rules live in AGENTS.md. New task wipes this transcript.'
-              : 'Ask XiaoBa to read or edit files in this repo.'}
-          </div>
-        )}
+      <div className="agent-log-wrap">
+        <div className="agent-log" ref={logRef}>
+          {messages.length === 0 && !error && (
+            <div className="agent-empty">
+              {helperActive
+                ? 'Helper edits RemotePad. Chat is scratch; lasting work is git + AGENTS.md. Refresh wipes this chat. + starts a general Agent in the selected repo.'
+                : 'General Agent — cwd follows the selected repo (or the file-tree root). + starts another one. Helper stays in its own tab.'}
+            </div>
+          )}
         {turns.map((turn) => (
           <div key={turn.key} className={`agent-turn ${turn.role}`}>
             {turn.role === 'user' && (
@@ -356,14 +372,15 @@ export function AgentPanel({
             {turn.role === 'tools' && (
               <div className="agent-tool-block">
                 {turn.tools.map((tool) => {
-                  const closed = collapsedTools.has(tool.id);
+                  const open = openTools.has(tool.id);
+                  const print = toolPrint(tool);
                   return (
                     <button
                       type="button"
                       key={tool.id}
-                      className={`agent-tool-row ${closed ? 'collapsed' : ''}`}
+                      className={`agent-tool-row ${open ? '' : 'collapsed'}`}
                       onClick={() => {
-                        setCollapsedTools((prev) => {
+                        setOpenTools((prev) => {
                           const next = new Set(prev);
                           if (next.has(tool.id)) next.delete(tool.id);
                           else next.add(tool.id);
@@ -371,9 +388,14 @@ export function AgentPanel({
                         });
                       }}
                     >
-                      <span className="agent-tool-chevron">{closed ? '▸' : '▾'}</span>
+                      <span className="agent-tool-chevron">{open ? '▾' : '▸'}</span>
                       <span className="agent-tool-name">{tool.name || 'tool'}</span>
-                      {!closed && tool.text && <span className="agent-tool-detail">{tool.text}</span>}
+                      {!open && print && <span className="agent-tool-hint">output</span>}
+                      {open && (
+                        <span className="agent-tool-detail">
+                          {print || tool.input || 'No output kept in the session file.'}
+                        </span>
+                      )}
                     </button>
                   );
                 })}
@@ -382,6 +404,10 @@ export function AgentPanel({
           </div>
         ))}
         {busy && <div className="agent-busy">Working…</div>}
+      </div>
+      {showJump && (
+        <button type="button" className="agent-jump" onClick={jumpToBottom} title="Jump to bottom" aria-label="Jump to bottom">↓</button>
+      )}
       </div>
       {changes.length > 0 && (
         <div className="agent-changes">
@@ -484,9 +510,9 @@ export function AgentPanel({
             }}
             disabled={busy}
             title={helperActive
-              ? 'Wipe Helper chat. AGENTS.md still injects on the next send.'
-              : "Wipe this session's saved history"}
-          >{helperActive ? 'New task' : 'Clear'}</button>
+              ? 'Wipe Helper chat. Lasting work is already in git and AGENTS.md.'
+              : "Wipe this Agent session's saved history"}
+          >{helperActive ? 'Refresh' : 'Clear'}</button>
           <span className="spacer" />
           {busy
             ? <button className="danger" onClick={onStop}>Stop</button>
@@ -500,6 +526,16 @@ export function AgentPanel({
 type Turn =
   | { key: string; role: 'user' | 'assistant' | 'status'; text: string }
   | { key: string; role: 'tools'; tools: AgentChatMessage[] };
+
+function isStubbedToolPrint(text: string): boolean {
+  return /历史工具结果已省略|历史输出已省略/.test(text);
+}
+
+function toolPrint(tool: AgentChatMessage): string {
+  const text = tool.text?.trim() ?? '';
+  if (!text || isStubbedToolPrint(text)) return '';
+  return tool.text;
+}
 
 function groupTurns(messages: AgentChatMessage[]): Turn[] {
   const out: Turn[] = [];
