@@ -67,6 +67,7 @@ export function AgentPanel({
   const [openIds, setOpenIds] = useState<string[]>([]);
   const [chips, setChips] = useState<{ path: string; name: string }[]>([]);
   const [tabMenu, setTabMenu] = useState<{ x: number; y: number; id: string } | null>(null);
+  const [sessionMenu, setSessionMenu] = useState<{ x: number; y: number; id: string } | null>(null);
   const [openTools, setOpenTools] = useState<Set<number>>(new Set());
   const [showJump, setShowJump] = useState(false);
   const busy = state === 'running';
@@ -201,6 +202,11 @@ export function AgentPanel({
     { type: 'sep' },
     { type: 'item', id: 'close', label: 'Close tab' },
   ] : [];
+  const historySession = sessionMenu ? sessions.find((item) => item.id === sessionMenu.id) : null;
+  const sessionMenuItems: MenuItem[] = sessionMenu && historySession ? [
+    { type: 'item', id: 'open-jsonl', label: 'Open session JSONL', disabled: !historySession.historyPath },
+    { type: 'item', id: 'rename', label: 'Rename', hint: 'Dbl-click' },
+  ] : [];
 
   return (
     <div className="agent-pane">
@@ -253,98 +259,26 @@ export function AgentPanel({
           }}
         />
       )}
-      {historyOpen && (
-        <button type="button" className="agent-history-mask" aria-label="Close history" onClick={() => setHistoryOpen(false)} />
+      {sessionMenu && historySession && (
+        <ActionMenu
+          x={sessionMenu.x}
+          y={sessionMenu.y}
+          items={sessionMenuItems}
+          onClose={() => setSessionMenu(null)}
+          onAction={(id) => {
+            if (id === 'open-jsonl') {
+              const path = historySession.historyPath;
+              if (path) onOpenSessionFile?.(path);
+            } else if (id === 'rename') {
+              setRenaming(historySession.id);
+              setRenameValue(historySession.title);
+              setHistoryOpen(true);
+            }
+          }}
+        />
       )}
-      {historyOpen && (
-        <div className="agent-history">
-          <div className="agent-history-head">
-            <span>Sessions</span>
-            <button className="ghost" onClick={() => setHistoryOpen(false)}>×</button>
-          </div>
-          {sessions.length > 4 && (
-            <input
-              className="agent-session-filter"
-              value={query}
-              placeholder="Filter sessions"
-              onChange={(e) => setQuery(e.target.value)}
-            />
-          )}
-          <div className="agent-session-list">
-            {visible.length === 0 && <div className="agent-session-empty">No sessions yet</div>}
-            {visible.map((item) => (
-              <div
-                key={item.id}
-                className={`agent-session ${item.id === sessionId ? 'active' : ''}`}
-                onClick={() => openFromHistory(item.id)}
-                onDoubleClick={(e) => {
-                  e.stopPropagation();
-                  setRenaming(item.id);
-                  setRenameValue(item.title);
-                }}
-                onContextMenu={(e) => {
-                  e.preventDefault();
-                  setTabMenu({ x: e.clientX, y: e.clientY, id: item.id });
-                }}
-              >
-                <div className="agent-session-row">
-                  {renaming === item.id ? (
-                    <input
-                      className="agent-session-rename"
-                      autoFocus
-                      value={renameValue}
-                      onClick={(e) => e.stopPropagation()}
-                      onChange={(e) => setRenameValue(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter') commitRename();
-                        if (e.key === 'Escape') setRenaming(null);
-                      }}
-                      onBlur={commitRename}
-                    />
-                  ) : (
-                    <span className="agent-session-title" title={item.id}>
-                      <span className="agent-session-kind">{isHelperSessionId(item.id) ? 'Helper' : 'Agent'}</span>
-                      {item.title}
-                    </span>
-                  )}
-                  <span className="agent-session-time">{formatTime(item.updatedAt)}</span>
-                </div>
-                {item.preview && item.preview !== item.title && (
-                  <div className="agent-session-preview">{item.preview}</div>
-                )}
-                <div className="agent-session-actions">
-                  {item.historyPath && (
-                    <button
-                      className="ghost"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onOpenSessionFile?.(item.historyPath!);
-                      }}
-                    >JSONL</button>
-                  )}
-                  <button
-                    className="ghost"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setRenaming(item.id);
-                      setRenameValue(item.title);
-                    }}
-                  >Rename</button>
-                  <button
-                    className="danger"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      if (window.confirm('Delete session ' + item.title + '? This removes its saved history.')) {
-                        onDelete(item.id);
-                      }
-                    }}
-                  >Delete</button>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
+      <div className="agent-body">
+        <div className="agent-main">
       {error && <div className="agent-banner">{error}</div>}
       <div className="agent-log-wrap">
         <div className="agent-log" ref={logRef}>
@@ -523,6 +457,85 @@ export function AgentPanel({
             ? <button className="danger" onClick={onStop}>Stop</button>
             : <button className="primary" onClick={submit}>Send</button>}
         </div>
+      </div>
+        </div>
+        {historyOpen && (
+          <aside className="agent-history">
+            <div className="agent-history-head">
+              <span>Sessions</span>
+              <button className="ghost" onClick={() => setHistoryOpen(false)}>×</button>
+            </div>
+            {sessions.length > 4 && (
+              <input
+                className="agent-session-filter"
+                value={query}
+                placeholder="Filter sessions"
+                onChange={(e) => setQuery(e.target.value)}
+              />
+            )}
+            <div className="agent-session-list">
+              {visible.length === 0 && <div className="agent-session-empty">No sessions yet</div>}
+              {visible.map((item) => (
+                <div
+                  key={item.id}
+                  className={`agent-session ${item.id === sessionId ? 'active' : ''}`}
+                  onClick={() => openFromHistory(item.id)}
+                  onDoubleClick={(e) => {
+                    e.stopPropagation();
+                    setRenaming(item.id);
+                    setRenameValue(item.title);
+                  }}
+                  onContextMenu={(e) => {
+                    e.preventDefault();
+                    setSessionMenu({ x: e.clientX, y: e.clientY, id: item.id });
+                  }}
+                >
+                  <div className="agent-session-row">
+                    {renaming === item.id ? (
+                      <input
+                        className="agent-session-rename"
+                        autoFocus
+                        value={renameValue}
+                        onClick={(e) => e.stopPropagation()}
+                        onChange={(e) => setRenameValue(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') commitRename();
+                          if (e.key === 'Escape') setRenaming(null);
+                        }}
+                        onBlur={commitRename}
+                      />
+                    ) : (
+                      <span className="agent-session-title" title={item.id}>
+                        <span className="agent-session-kind">{isHelperSessionId(item.id) ? 'Helper' : 'Agent'}</span>
+                        {item.title}
+                      </span>
+                    )}
+                    <span className="agent-session-time">{formatTime(item.updatedAt)}</span>
+                    <button
+                      type="button"
+                      className="agent-session-delete"
+                      aria-label={`Delete session ${item.title}`}
+                      title="Delete session"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (window.confirm('Delete session ' + item.title + '? This removes its saved history.')) {
+                          onDelete(item.id);
+                        }
+                      }}
+                    >
+                      <svg viewBox="0 0 16 16" aria-hidden="true">
+                        <path fill="currentColor" d="M6.5 1.5h3a.5.5 0 0 1 .5.5v.5H11a.5.5 0 0 1 0 1H5a.5.5 0 0 1 0-1h1V2a.5.5 0 0 1 .5-.5zM3.2 4h9.6l-.72 9.1a1.5 1.5 0 0 1-1.5 1.4H5.42a1.5 1.5 0 0 1-1.5-1.4L3.2 4z" />
+                      </svg>
+                    </button>
+                  </div>
+                  {item.preview && item.preview !== item.title && (
+                    <div className="agent-session-preview">{item.preview}</div>
+                  )}
+                </div>
+              ))}
+            </div>
+          </aside>
+        )}
       </div>
     </div>
   );

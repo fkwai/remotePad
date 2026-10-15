@@ -114,6 +114,7 @@ If a job is about click / double-click / reveal / scroll, read this table first.
 | Folder explorer selection | right-click menu / Del | Download (files) · Delete |
 | Editor tab / body menu | Revert | discard dirty buffer; `git restore` to HEAD when in a repo, then reload from disk |
 | Agent **tab** | right-click | Open session JSONL · Rename · Close |
+| Agent history (`☰`) | toggle | docked right column that squeezes the chat (like the Files column); each row shows only a delete icon; JSONL / Rename live in the row's right-click menu (Rename hint `Dbl-click`) |
 | Agent compose | — | pinned at bottom (never clipped); input stays enabled while running |
 | Agent transcript | — | You / Agent roles; tool rows start folded (▸) with live print inside — expand to read output before XiaoBa stubs it in the JSONL; a jump-to-bottom ↓ button appears once you scroll up more than one viewport from the bottom |
 | Helper | Refresh | wipe this Helper chat in place (git + this file keep the work); does not spawn a new helper |

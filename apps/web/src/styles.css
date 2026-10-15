@@ -1326,30 +1326,26 @@ button.tree-node:hover { border-color: transparent; }
   min-width: 0;
   flex: 0 1 auto;
 }
-.agent-history-mask {
-  position: absolute;
-  top: 33px;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  z-index: 5;
-  background: #0004;
-  border: 0;
-  padding: 0;
-  border-radius: 0;
+.agent-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
 }
-.agent-history {
-  position: absolute;
-  top: 33px;
-  right: 0;
-  bottom: 0;
-  width: min(220px, 62%);
-  z-index: 6;
+.agent-main {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
   display: flex;
   flex-direction: column;
-  background: var(--panel);
+}
+.agent-history {
+  flex: 0 0 240px;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--panel-2);
   border-left: 1px solid var(--border);
-  box-shadow: var(--shadow);
 }
 .agent-history-head {
   display: flex;
@@ -1433,14 +1429,25 @@ button.tree-node:hover { border-color: transparent; }
   font-size: 11px;
   padding: 0 4px;
 }
-.agent-session-actions {
-  display: none;
-  gap: 4px;
-  margin-top: 4px;
+.agent-session-delete {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 2px;
+  min-width: 16px;
+  color: var(--danger);
+  background: transparent;
+  border-color: transparent;
+  opacity: 0.4;
 }
-.agent-session:hover .agent-session-actions,
-.agent-session.active .agent-session-actions {
-  display: flex;
+.agent-session:hover .agent-session-delete,
+.agent-session.active .agent-session-delete {
+  opacity: 1;
+}
+.agent-session-delete svg {
+  width: 14px;
+  height: 14px;
 }
 .agent-session-rename {
   flex: 1;
