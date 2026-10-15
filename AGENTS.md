@@ -90,7 +90,8 @@ If a job is about click / double-click / reveal / scroll, read this table first.
 | Editor **tab** | right-click | reveal / keep / save / revert / close left·right·all; folder tab also **Refresh** |
 | Editor **tab** name | unsaved | `●` + accent on the tab (and Files list); no Save/Revert on the top bar — use `Ctrl/⌘+S` or the menu |
 | Editor **tab** | new | Inserts on the left; strip scrolls when full, each name compacts to first4…last4 (extension dropped) |
-| Editor **tab** | Files toggle | Right side of tab strip; opens a right column of the editor (squeezes editor/scrollbar left while open; closed = editor flush right) |
+| Editor **tab** | Files toggle | Right side of tab strip; opens a right column. Editor + scrollbar shrink together; closed = both flush to the pane edge |
+| Editor **body** | scrollbar | Flush with the editor’s right edge (no overview-ruler gutter); moves with the editor when Files is open |
 | Editor **tab** | drag | to Terminal / Agent: insert path; to address bar or a new browser tab: open a tree + editor window (`?pad=`) |
 | Editor **tab** | close × | Far right, small hit; a 14px gap after the name; hover tints only the ×, not the file name |
 | Folder explorer | right-click | **Refresh** reloads this folder listing |

@@ -114,6 +114,10 @@ export function EditorArea({
   }, [tab?.path]);
 
   useLayoutEffect(() => {
+    edRef.current?.layout();
+  }, [filesOpen]);
+
+  useLayoutEffect(() => {
     const el = tabsRef.current;
     const measure = measureRef.current;
     if (!el || !measure) return;
@@ -323,6 +327,8 @@ export function EditorArea({
                 ? <div className="empty">Binary file — switch to rendered view if this is an image.</div>
                 : (
                   <Editor
+                    height="100%"
+                    width="100%"
                     theme="remotepad"
                     language={monacoLanguage(tab.path)}
                     value={tab.content}
@@ -363,6 +369,16 @@ export function EditorArea({
                       scrollBeyondLastLine: false,
                       wordWrap: 'on',
                       padding: { top: 8 },
+                      overviewRulerLanes: 0,
+                      overviewRulerBorder: false,
+                      hideCursorInOverviewRuler: true,
+                      scrollbar: {
+                        vertical: 'auto',
+                        horizontal: 'auto',
+                        verticalScrollbarSize: 14,
+                        horizontalScrollbarSize: 14,
+                        useShadows: false,
+                      },
                       contextmenu: false,
                       parameterHints: { enabled: false },
                       quickSuggestions: false,

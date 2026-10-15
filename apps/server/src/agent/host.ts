@@ -275,6 +275,53 @@ function unlinkSessionFiles(sessionId: string): void {
   }
 }
 
+// RemotePad keeps its own append-only transcript so the Agent panel keeps the
+// user-visible history even when XiaoBa compacts the session JSONL (which
+// replaces older messages with a checkpoint summary and skips them on read).
+function displayHistoryFile(sessionId: string): string {
+  const safe = sessionId.replace(/[^a-zA-Z0-9_-]/g, '_');
+  return path.join(os.homedir(), '.remotepad', 'history', `${safe}.jsonl`);
+}
+
+function appendDisplayHistory(sessionId: string, item: AgentHistoryItem): void {
+  if (!sessionId) return;
+  if (!item.text && item.role !== 'tool') return;
+  try {
+    const fp = displayHistoryFile(sessionId);
+    fs.mkdirSync(path.dirname(fp), { recursive: true });
+    fs.appendFileSync(fp, JSON.stringify(item) + '\n');
+  } catch { /* ignore */ }
+}
+
+function unlinkDisplayHistory(sessionId: string): void {
+  try { fs.rmSync(displayHistoryFile(sessionId), { force: true }); } catch { /* ignore */ }
+}
+
+function readDisplayHistory(sessionId: string): AgentHistoryItem[] {
+  const fp = displayHistoryFile(sessionId);
+  if (!fs.existsSync(fp)) return [];
+  const items: AgentHistoryItem[] = [];
+  try {
+    const raw = fs.readFileSync(fp, 'utf8');
+    for (const line of raw.split('\n')) {
+      if (!line.trim()) continue;
+      try {
+        const item = JSON.parse(line) as AgentHistoryItem;
+        if (item && typeof item.text === 'string' && (item.role === 'user' || item.role === 'assistant' || item.role === 'tool')) {
+          items.push(item);
+        }
+      } catch { /* skip bad line */ }
+    }
+  } catch { /* ignore */ }
+  return items.slice(-1000);
+}
+
+function readTranscriptHistory(sessionId: string): AgentHistoryItem[] {
+  const display = readDisplayHistory(sessionId);
+  if (display.length > 0) return display;
+  return readHistory(sessionId);
+}
+
 function contentText(content: unknown): string {
   if (typeof content === 'string') return content;
   if (Array.isArray(content)) {
