@@ -65,13 +65,17 @@ export function AgentPanel({
   const [renameValue, setRenameValue] = useState('');
   const [historyOpen, setHistoryOpen] = useState(false);
   const [openIds, setOpenIds] = useState<string[]>([]);
-  const [chips, setChips] = useState<{ path: string; name: string }[]>([]);
+  const [chips, setChips] = useState<Record<string, { path: string; name: string }[]>>({});
+  const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [tabMenu, setTabMenu] = useState<{ x: number; y: number; id: string } | null>(null);
   const [sessionMenu, setSessionMenu] = useState<{ x: number; y: number; id: string } | null>(null);
   const [openTools, setOpenTools] = useState<Set<number>>(new Set());
   const [showJump, setShowJump] = useState(false);
   const busy = state === 'running';
   const helperActive = isHelperSessionId(sessionId);
+  const activeId = sessionId ?? '';
+  const activeChips = chips[activeId] ?? [];
+  const draft = drafts[activeId] ?? '';
 
   useEffect(() => {
     const node = logRef.current;
@@ -143,7 +147,11 @@ export function AgentPanel({
 
   function addChip(path: string, name?: string) {
     const label = name || basename(path);
-    setChips((prev) => prev.some((item) => item.path === path) ? prev : [...prev, { path, name: label }]);
+    setChips((prev) => {
+      const cur = prev[activeId] ?? [];
+      if (cur.some((item) => item.path === path)) return prev;
+      return { ...prev, [activeId]: [...cur, { path, name: label }] };
+    });
   }
 
   function jumpToBottom() {
@@ -152,14 +160,13 @@ export function AgentPanel({
   }
 
   function submit() {
-    const text = inputRef.current?.value ?? '';
-    const chipBlock = chips.map((item) => item.path).join('\n');
-    const body = [chipBlock, text].filter((part) => part.trim()).join('\n\n');
+    const chipBlock = activeChips.map((item) => item.path).join('\n');
+    const body = [chipBlock, draft].filter((part) => part.trim()).join('\n\n');
     if (!body.trim() || busy) return;
     pinBottom.current = true;
     onSend(body);
-    if (inputRef.current) inputRef.current.value = '';
-    setChips([]);
+    setDrafts((prev) => ({ ...prev, [activeId]: '' }));
+    setChips((prev) => ({ ...prev, [activeId]: [] }));
     requestAnimationFrame(() => inputRef.current?.focus());
   }
 
@@ -392,9 +399,9 @@ export function AgentPanel({
           addChip(entry.path, entry.name);
         }}
       >
-        {chips.length > 0 && (
+        {activeChips.length > 0 && (
           <div className="agent-chips">
-            {chips.map((chip) => (
+            {activeChips.map((chip) => (
               <a
                 key={chip.path}
                 className="agent-chip"
@@ -413,7 +420,10 @@ export function AgentPanel({
                   onClick={(e) => {
                     e.preventDefault();
                     e.stopPropagation();
-                    setChips((prev) => prev.filter((item) => item.path !== chip.path));
+                    setChips((prev) => {
+                      const cur = prev[activeId] ?? [];
+                      return { ...prev, [activeId]: cur.filter((item) => item.path !== chip.path) };
+                    });
                   }}
                 >×</button>
               </a>
@@ -423,6 +433,8 @@ export function AgentPanel({
         <textarea
           ref={inputRef}
           rows={3}
+          value={draft}
+          onChange={(e) => setDrafts((prev) => ({ ...prev, [activeId]: e.target.value }))}
           placeholder={busy ? 'Agent is working… (Enter queues after stop)' : helperActive ? 'Message Helper · drop files as chips' : 'Message XiaoBa · drop files as chips'}
           onDragOver={(e) => {
             if (hasEntryDrag(e)) e.preventDefault();
@@ -444,7 +456,7 @@ export function AgentPanel({
           <button
             className="ghost"
             onClick={() => {
-              setChips([]);
+              setChips((prev) => ({ ...prev, [activeId]: [] }));
               onClear();
             }}
             disabled={busy}
