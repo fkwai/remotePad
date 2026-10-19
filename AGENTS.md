@@ -54,6 +54,7 @@ UI regions (product names): **Sidebar** (left), **Editor** (middle top), **Termi
 | Workspaces / Repos store | `~/.remotepad/workspaces.json` (server routes under `apps/server`) |
 | Favorites | `~/.remotepad/favorites.json` |
 | Host / ports | `settings.json` at install root (`host`, `port`, `uiPort`; env overrides) |
+| Agent model | `~/.remotepad/llm.json` (DeepSeek key + model; not in git). Host pop **Agent model** form. `GET/PUT /api/llm`. Applied over XiaoBa `.env` on the next Agent message. |
 | Viewer modules | `packages/shared/src/modules.ts` catalog; enabled flags in `~/.remotepad/modules.json`; `GET/PUT /api/modules`; Host pop (computer name) toggles load/unload. Core is always code + folder + diff. Optional: markdown, json, jsonl, csv, image, html, log. Disabled types open as code. New modules should `defaultOn: false`. |
 | UI session restore | `tmp/session.json` under this repo |
 | Shared protocol | `packages/shared/src/index.ts` |
@@ -92,6 +93,7 @@ If a job is about click / double-click / reveal / scroll, read this table first.
 | Editor **tab** | new | Inserts on the left; strip scrolls when full, each name compacts to first4…last4 (extension dropped) |
 | Editor **tab** | Files toggle | Right side of tab strip; opens a right column. Editor + scrollbar shrink together; closed = both flush to the pane edge |
 | Editor **body** | scrollbar | Flush with the editor’s right edge (no overview-ruler gutter); moves with the editor when Files is open |
+| Rendered view (md) | width | Fills the full editor width — no `max-width` cap on `.md-body` |
 | Editor **tab** | drag | to Terminal / Agent: insert path; to address bar or a new browser tab: open a tree + editor window (`?pad=`) |
 | Editor **tab** | close × | Far right, small hit; a 14px gap after the name; hover tints only the ×, not the file name |
 | Folder explorer | right-click | **Refresh** reloads this folder listing |
@@ -102,7 +104,7 @@ If a job is about click / double-click / reveal / scroll, read this table first.
 | Editor **body** | Shift+Enter (`.py`) | Dedent selection and wrap in `exec(compile(...))` so REPL `if`/`else` blocks are not broken by blank lines; other languages paste raw |
 | Editor **body** (Monaco) | double-click | word select; not reveal-in-tree |
 | Editor **body** (PNG / HTML) | Ctrl+scroll | Zoom that preview only; does not zoom the browser page |
-| Host pop (computer name) | click | host / git / terminals · **Viewer modules** on/off |
+| Host pop (computer name) | click | host / git / terminals · **Agent model** (DeepSeek key + model) · **Viewer modules** on/off |
 | Editor **status** bar | `</>` on the left · `Ctrl/⌘+L` | toggle source / rendered for viewer modules; only bar besides the tab strip |
 | Editor **body** (image) | left click | pick a pixel; `x` `y` grey (plus RGB if color) on the same bottom status bar |
 | File tree rows | indent | chevron `>` and file marks share one column at the same depth (files must not sit extra-indented) |

@@ -89,7 +89,7 @@ button.primary.save-btn.dirty {
 button.ghost { background: transparent; border-color: transparent; }
 button.ghost:hover { background: var(--panel-3); }
 button.danger { color: var(--danger); }
-input[type="text"], input[type="search"] {
+input[type="text"], input[type="search"], input[type="password"] {
   background: var(--bg);
   border: 1px solid var(--border);
   border-radius: 6px;
@@ -867,7 +867,7 @@ button.tree-node:hover { border-color: transparent; }
   overflow: auto;
   padding: 16px 20px 40px;
 }
-.md-body { max-width: 820px; line-height: 1.6; color: var(--text); }
+.md-body { line-height: 1.6; color: var(--text); }
 .md-body a, .md-body a:visited {
   color: var(--md-link);
   text-decoration: underline;
@@ -1103,6 +1103,9 @@ button.tree-node:hover { border-color: transparent; }
 .info h3:first-child { margin-top: 4px; }
 .info .kv { color: var(--muted); font-family: var(--mono); font-size: 12px; word-break: break-all; }
 .info .kv b { color: var(--text); font-weight: 550; }
+.llm-form { display: flex; flex-direction: column; gap: 6px; }
+.llm-form label { display: flex; flex-direction: column; gap: 3px; font-size: 11px; color: var(--muted); }
+.llm-save { align-self: flex-start; margin-top: 2px; }
 .mod-row {
   display: flex;
   align-items: center;
