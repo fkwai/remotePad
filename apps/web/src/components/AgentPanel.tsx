@@ -124,6 +124,11 @@ export function AgentPanel({
     setOpenTools(new Set());
   }, [sessionId]);
 
+  useEffect(() => {
+    const node = logRef.current;
+    if (node) node.scrollTop = node.scrollHeight;
+  }, [sessionId]);
+
   const openTabs = useMemo(() => {
     const byId = new Map(sessions.map((item) => [item.id, item]));
     const tabs = openIds
@@ -145,6 +150,15 @@ export function AgentPanel({
 
   const turns = useMemo(() => groupTurns(messages), [messages]);
 
+  const allToolIds = useMemo(() => {
+    const ids: number[] = [];
+    for (const turn of turns) {
+      if (turn.role === 'tools') for (const tool of turn.tools) ids.push(tool.id);
+    }
+    return ids;
+  }, [turns]);
+  const allToolsOpen = allToolIds.length > 0 && allToolIds.every((id) => openTools.has(id));
+
   function addChip(path: string, name?: string) {
     const label = name || basename(path);
     setChips((prev) => {
@@ -157,6 +171,10 @@ export function AgentPanel({
   function jumpToBottom() {
     const node = logRef.current;
     if (node) node.scrollTo({ top: node.scrollHeight, behavior: 'smooth' });
+  }
+
+  function toggleAllTools() {
+    setOpenTools(allToolsOpen ? new Set() : new Set(allToolIds));
   }
 
   function submit() {
@@ -245,6 +263,15 @@ export function AgentPanel({
           title="Session history"
           aria-label="Session history"
         >☰</button>
+        {allToolIds.length > 0 && (
+          <button
+            type="button"
+            className={`ghost agent-chrome-btn ${allToolsOpen ? 'on' : ''}`}
+            onClick={toggleAllTools}
+            title={allToolsOpen ? 'Fold all tool calls' : 'Unfold all tool calls'}
+            aria-label={allToolsOpen ? 'Fold all tool calls' : 'Unfold all tool calls'}
+          >{allToolsOpen ? '▾▾' : '▸▸'}</button>
+        )}
       </div>
       {tabMenu && menuSession && (
         <ActionMenu

@@ -112,7 +112,7 @@ input:focus { border-color: #4a7f73; }
   -ms-user-select: none;
   user-select: none;
 }
-.editor-body, .editor-body *, textarea, input, .xterm, .xterm *, .md-view, .md-view * {
+.editor-body, .editor-body *, textarea, input, .xterm, .xterm *, .md-view, .md-view *, .agent-log, .agent-log * {
   -webkit-user-select: text;
   -moz-user-select: text;
   -ms-user-select: text;
