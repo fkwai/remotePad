@@ -50,7 +50,7 @@ UI regions (product names): **Sidebar** (left), **Editor** (middle top), **Termi
 | Drag/drop MIME | `apps/web/src/dnd.ts` |
 | Open-file popup API | `apps/server/src/routes/ui.ts`, `ui-bus.ts` (`POST /api/ui/open`) |
 | Agent tabs / chat | `apps/web/src/components/AgentPanel.tsx`, `RightDock.tsx` |
-| Agent host (XiaoBa embed) | `apps/server/src/agent/host.ts`, `ws.ts` |
+| Agent host (XiaoBa embed) | `apps/server/src/agent/host.ts`, `ws.ts` — local **catscompany** surface via `createAdapterRuntime` (CatsCo-shaped runtime, no CatsCo cloud/users/WS bot) |
 | Workspaces / Repos store | `~/.remotepad/workspaces.json` (server routes under `apps/server`) |
 | Favorites | `~/.remotepad/favorites.json` |
 | Host / ports | `settings.json` at install root (`host`, `port`, `uiPort`; env overrides) |
@@ -124,9 +124,11 @@ If a job is about click / double-click / reveal / scroll, read this table first.
 
 ## Agent sessions
 
+- Runtime: local XiaoBa **catscompany** surface (`createAdapterRuntime` + mutable-identity prompts). Not the CatsCo web connector (no login/users/WS bot). LLM from Host **Agent model** / `~/.remotepad/llm.json`.
 - Normal sessions: id `rp-*` (or legacy `remotepad`); cwd follows active repo or tree root.
 - Helper sessions: id `helper` (legacy) or `helper-*`; cwd is always `repoRoot`. **Refresh** wipes the current Helper chat. Close / delete like any other session. Clicking a Repos row updates `rp-*` cwd only — it does not reload Helper (or any open) chat.
-- Session JSONL: `~/.remotepad/xiaoba/data/sessions/{id}.jsonl`
+- Switching Agent tabs abandons an in-flight run (`runGen` + session lock in `host.ts`); the new tab must not stay stuck on Working / “already running”.
+- Panel transcript (Open session JSONL): `~/.remotepad/history/{id}.jsonl` — append-only; user lines are written as soon as Send is accepted. XiaoBa's compactable context stays at `~/.remotepad/xiaoba/data/sessions/{id}.jsonl`.
 - Active id / titles: `~/.remotepad/agent-active.json`
 
 ## Git

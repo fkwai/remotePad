@@ -257,13 +257,13 @@ export type AgentServerMessage =
     changes: AgentChange[];
   }
   | { type: 'sessions'; sessions: AgentSessionInfo[] }
-  | { type: 'user'; text: string }
-  | { type: 'text'; text: string }
-  | { type: 'tool_start'; name: string; id?: string; input?: unknown }
-  | { type: 'tool_end'; name: string; id?: string; ok?: boolean; result?: string }
-  | { type: 'status'; state: AgentStatus; message?: string }
+  | { type: 'user'; text: string; sessionId?: string }
+  | { type: 'text'; text: string; sessionId?: string }
+  | { type: 'tool_start'; name: string; id?: string; input?: unknown; sessionId?: string }
+  | { type: 'tool_end'; name: string; id?: string; ok?: boolean; result?: string; sessionId?: string }
+  | { type: 'status'; state: AgentStatus; message?: string; sessionId?: string }
   | { type: 'changes'; files: AgentChange[]; touched?: string[] }
-  | { type: 'error'; message: string };
+  | { type: 'error'; message: string; sessionId?: string };
 
 export const TEXT_SIZE_LIMIT = 8 * 1024 * 1024;
 
@@ -288,3 +288,11 @@ export {
   type ViewerModuleId,
   type ViewerModuleInfo,
 } from './modules.ts';
+
+export {
+  LLM_DEFAULT_BASE,
+  LLM_DEFAULT_MODEL,
+  LLM_MODELS,
+  type LlmSettingsPut,
+  type LlmSettingsView,
+} from './llm.ts';

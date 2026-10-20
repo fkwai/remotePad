@@ -1022,6 +1022,8 @@ export function App() {
       }
       setAgentState((prev) => {
         if (msg.error) return 'error';
+        // Session switches must leave Working; only keep running for the same tab's hello refresh.
+        if (!sameSession) return 'idle';
         return prev === 'running' ? prev : 'idle';
       });
     } else if (msg.type === 'sessions') {

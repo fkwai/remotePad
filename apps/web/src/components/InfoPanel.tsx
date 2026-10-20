@@ -1,6 +1,7 @@
 import type { GitStatusResponse, MachineInfo, TermSessionInfo, ViewerModuleId } from '@remotepad/shared';
 import { VIEWER_MODULES } from '@remotepad/shared';
 import { basename } from '../files';
+import { LlmSettings } from './LlmSettings';
 
 export function InfoPanel({
   path,
@@ -50,6 +51,8 @@ export function InfoPanel({
             ))}
           </>
         )}
+        <h3>Agent model</h3>
+        <LlmSettings />
         <h3>Viewer modules</h3>
         {VIEWER_MODULES.map((mod) => {
           const on = modules ? modules[mod.id] : mod.defaultOn;

@@ -19,7 +19,7 @@ export function HelpPop({ onClose }: { onClose: () => void }) {
           <p><kbd>Ctrl</kbd>/<kbd>⌘</kbd>+<kbd>S</kbd> save · unsaved tabs show <em>●</em> · also on the tab / editor menu</p>
           <p><kbd>Ctrl</kbd>/<kbd>⌘</kbd>+<kbd>`</kbd> show or hide the terminal</p>
           <p><kbd>Ctrl</kbd>/<kbd>⌘</kbd>+<kbd>L</kbd> toggle source / rendered · click the address bar to edit the path</p>
-          <p>Click the computer name for host, git, terminals, and viewer modules</p>
+          <p>Click the computer name for host, git, the Agent model, terminals, and viewer modules</p>
         </section>
         <section>
           <h3>Files & Explorer</h3>

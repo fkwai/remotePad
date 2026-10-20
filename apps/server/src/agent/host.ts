@@ -6,6 +6,7 @@ import { execFileSync } from 'node:child_process';
 import type { AgentChange, AgentHistoryItem, AgentServerMessage, AgentSessionInfo, AgentStatus } from '@remotepad/shared';
 import { isHelperSessionId } from '@remotepad/shared';
 import { config } from '../config.ts';
+import { applyLlmSettingsToEnv } from '../llm-settings.ts';
 import { ChangeTracker } from './changes.ts';
 
 type Listener = (msg: AgentServerMessage) => void;
@@ -21,7 +22,7 @@ type ToolConfirmRequest = {
 type SystemPromptProvider = () => Promise<string> | string;
 
 type XiaobaSession = {
-  handleMessage: (text: string, callbacks: Record<string, unknown>) => Promise<{ text?: string }>;
+  handleMessage: (text: string, opts: Record<string, unknown>) => Promise<{ text?: string }>;
   requestInterrupt: () => void;
   reset: () => void;
   clear?: () => boolean;
@@ -35,9 +36,18 @@ type XiaobaBundle = {
   profile: { skills: { enabled: boolean }; workingDirectory?: string };
   services: {
     skillManager: unknown;
-    aiService: { getConfig: () => { model?: string; provider?: string } };
+    aiService: { getConfig: () => { model?: string; provider?: string; apiKey?: string } };
   };
   session: XiaobaSession;
+};
+
+type AdapterRuntimeBundle = {
+  profile: XiaobaBundle['profile'] & Record<string, unknown>;
+  services: XiaobaBundle['services'];
+  sessionManagerOptions: {
+    systemPromptProviderFactory?: (sessionKey: string) => SystemPromptProvider;
+  };
+  loadSkills: () => Promise<void>;
 };
 
 type XiaobaMods = {
@@ -50,9 +60,44 @@ type XiaobaMods = {
       sessionType?: string,
     ) => SystemPromptProvider;
   };
-  resolveRuntimeProfileFromConfig: (opts: Record<string, unknown>) => { profile: unknown };
+  createAdapterRuntime: (opts: Record<string, unknown>) => AdapterRuntimeBundle;
+  composeSessionSystemPromptProvider?: (
+    base: SystemPromptProvider,
+    context: { sessionKey: string; sessionType?: string },
+  ) => SystemPromptProvider;
   Logger?: { openLogFile?: (name: string, extra?: unknown, flag?: boolean) => void };
 };
+
+/** Local single-user CatsCo-shaped turn identity (no cloud users / grants). */
+function localCatscoTurn(sessionId: string): {
+  executionScope: Record<string, unknown>;
+  sessionRoute: Record<string, unknown>;
+} {
+  const topicId = sessionId;
+  const actorUserId = 'local_user';
+  const agentId = 'agent_self';
+  const identity = {
+    source: 'catscompany',
+    topicId,
+    topicType: 'p2p',
+    actorUserId,
+    agentId,
+    identityTrust: 'legacy_context',
+  };
+  return {
+    executionScope: {
+      ...identity,
+      sessionKey: sessionId,
+      isTrusted: true,
+    },
+    sessionRoute: {
+      version: 2,
+      ...identity,
+      sessionKey: sessionId,
+      identity,
+    },
+  };
+}
 
 let mods: XiaobaMods | null = null;
 let loadError: string | null = null;
@@ -96,9 +141,12 @@ function applyDotenvFile(filePath: string): void {
 function loadXiaobaEnv(): void {
   fs.mkdirSync(config.xiaobaDataDir, { recursive: true });
   process.env.XIAOBA_USER_DATA_DIR = config.xiaobaDataDir;
+  if (!process.env.CURRENT_PLATFORM) process.env.CURRENT_PLATFORM = 'catscompany';
+  if (!process.env.CURRENT_AGENT_DISPLAY_NAME) process.env.CURRENT_AGENT_DISPLAY_NAME = 'RemotePad';
   const envFile = xiaobaEnvFile();
   process.env.DOTENV_CONFIG_PATH = envFile;
   applyDotenvFile(envFile);
+  applyLlmSettingsToEnv();
 }
 
 function llmFingerprint(): string {
@@ -273,6 +321,7 @@ function unlinkSessionFiles(sessionId: string): void {
   for (const fp of [sessionFile(sessionId), sessionStateFile(sessionId)]) {
     try { if (fs.existsSync(fp)) fs.unlinkSync(fp); } catch { /* ignore */ }
   }
+  unlinkDisplayHistory(sessionId);
 }
 
 // RemotePad keeps its own append-only transcript so the Agent panel keeps the
@@ -290,6 +339,21 @@ function appendDisplayHistory(sessionId: string, item: AgentHistoryItem): void {
     const fp = displayHistoryFile(sessionId);
     fs.mkdirSync(path.dirname(fp), { recursive: true });
     fs.appendFileSync(fp, JSON.stringify(item) + '\n');
+  } catch { /* ignore */ }
+}
+
+// On the first round of an existing session, copy what XiaoBa already persisted
+// into our append-only transcript so we don't drop older turns when we switch
+// the panel over to reading this file. XiaoBa's own JSONL is left untouched.
+function seedDisplayHistory(sessionId: string): void {
+  if (!sessionId) return;
+  const fp = displayHistoryFile(sessionId);
+  if (fs.existsSync(fp)) return;
+  const items = readHistory(sessionId);
+  if (items.length === 0) return;
+  try {
+    fs.mkdirSync(path.dirname(fp), { recursive: true });
+    fs.writeFileSync(fp, items.map((item) => JSON.stringify(item)).join('\n') + '\n');
   } catch { /* ignore */ }
 }
 
@@ -316,10 +380,19 @@ function readDisplayHistory(sessionId: string): AgentHistoryItem[] {
   return items.slice(-1000);
 }
 
-function readTranscriptHistory(sessionId: string): AgentHistoryItem[] {
+function readTranscriptHistory(sessionId: string, prints?: Map<string, string>): AgentHistoryItem[] {
+  seedDisplayHistory(sessionId);
   const display = readDisplayHistory(sessionId);
   if (display.length > 0) return display;
-  return readHistory(sessionId);
+  return readHistory(sessionId, prints);
+}
+
+/** Prefer the append-only panel transcript; fall back to XiaoBa's compactable context file. */
+function transcriptPath(sessionId: string): string {
+  seedDisplayHistory(sessionId);
+  const display = displayHistoryFile(sessionId);
+  if (fs.existsSync(display)) return display;
+  return sessionFile(sessionId);
 }
 
 function contentText(content: unknown): string {
@@ -389,27 +462,22 @@ function clip(text: string, max: number): string {
 }
 
 function sessionInfo(sessionId: string, customTitle?: string): AgentSessionInfo {
-  const fp = sessionFile(sessionId);
+  const fp = transcriptPath(sessionId);
   let updatedAt = Date.now();
   let firstUser = '';
   let lastText = '';
-  if (fs.existsSync(fp)) {
+  const items = readTranscriptHistory(sessionId);
+  if (items.length > 0) {
     try { updatedAt = fs.statSync(fp).mtimeMs; } catch { /* ignore */ }
-    const raw = fs.readFileSync(fp, 'utf8');
-    for (const line of raw.split('\n')) {
-      if (!line.trim()) continue;
-      try {
-        const msg = JSON.parse(line) as { role?: string; content?: unknown };
-        if (msg.role !== 'user' && msg.role !== 'assistant') continue;
-        if (msg.role === 'user' && isCheckpointUser(msg)) continue;
-        const text = contentText(msg.content).trim();
-        if (!text) continue;
-        if (msg.role === 'user' && !firstUser) firstUser = text;
-        lastText = text;
-      } catch {
-        // skip bad line
-      }
+    for (const item of items) {
+      if (item.role !== 'user' && item.role !== 'assistant') continue;
+      const text = item.text.trim();
+      if (!text) continue;
+      if (item.role === 'user' && !firstUser) firstUser = text;
+      lastText = text;
     }
+  } else if (fs.existsSync(sessionFile(sessionId))) {
+    try { updatedAt = fs.statSync(sessionFile(sessionId)).mtimeMs; } catch { /* ignore */ }
   }
   const named = customTitle && customTitle !== 'Helper' ? customTitle : '';
   const title = isHelperSession(sessionId) ? 'Helper' : (named || firstUser || 'New session');
@@ -466,14 +534,21 @@ function loadMods(): XiaobaMods {
   };
   try {
     const factory = loadFile('runtime/runtime-factory');
-    const profile = loadFile('runtime/runtime-profile-config');
+    const adapter = loadFile('runtime/adapter-runtime');
+    const sessionPrompt = (() => {
+      try { return loadFile('core/session-system-prompt'); } catch { return {}; }
+    })();
     const logger = (() => {
       try { return loadFile('utils/logger'); } catch { return {}; }
     })();
     logger.Logger?.openLogFile?.('remotepad', undefined, true);
+    if (typeof adapter.createAdapterRuntime !== 'function') {
+      throw new Error('XiaoBa createAdapterRuntime missing');
+    }
     mods = {
       RuntimeFactory: factory.RuntimeFactory,
-      resolveRuntimeProfileFromConfig: profile.resolveRuntimeProfileFromConfig,
+      createAdapterRuntime: adapter.createAdapterRuntime,
+      composeSessionSystemPromptProvider: sessionPrompt.composeSessionSystemPromptProvider,
       Logger: logger.Logger,
     };
     return mods;
@@ -503,8 +578,22 @@ export class AgentHost {
   private helperLastUser = '';
   readonly tracker = new ChangeTracker();
   private sending = false;
+  /** Bumped on every session switch so an in-flight send cannot touch the new tab. */
+  private runGen = 0;
+  /** Serializes ensureSession / cleanup so open and send cannot rebuild at once. */
+  private sessionLock: Promise<void> = Promise.resolve();
   /** Live tool prints, keyed by `${sessionId}\\0${toolCallId}`, kept until that session is deleted. */
   private toolPrint = new Map<string, string>();
+
+  private withSessionLock<T>(fn: () => Promise<T>): Promise<T> {
+    const run = this.sessionLock.then(fn, fn);
+    this.sessionLock = run.then(() => undefined, () => undefined);
+    return run;
+  }
+
+  private isCurrentRun(gen: number, sessionId: string): boolean {
+    return this.runGen === gen && this.sessionId === sessionId;
+  }
 
   subscribe(fn: Listener): () => void {
     this.listeners.add(fn);
@@ -542,7 +631,7 @@ export class AgentHost {
       model: this.model || undefined,
       error: this.error,
       sessionId: this.sessionId || undefined,
-      history: includeHistory && this.sessionId ? readHistory(this.sessionId, this.toolPrint) : undefined,
+      history: includeHistory && this.sessionId ? readTranscriptHistory(this.sessionId, this.toolPrint) : undefined,
       sessions: listSessions(this.sessionId),
       changes: this.tracker.list(),
     });
@@ -564,19 +653,32 @@ export class AgentHost {
     return path.resolve(this.uiCwd || process.cwd());
   }
 
-  private attachHelperPrompt(loaded: XiaobaMods, profile: unknown, bundle: XiaobaBundle): void {
+  private attachSessionPrompt(
+    loaded: XiaobaMods,
+    bundle: XiaobaBundle,
+    adapter: AdapterRuntimeBundle,
+  ): void {
     if (!bundle.session.setSystemPromptProvider) return;
-    const baseProvider = loaded.RuntimeFactory.createSessionSystemPromptProvider?.(
-      profile,
-      this.sessionId,
-      'cli',
-    );
+    const factory = adapter.sessionManagerOptions.systemPromptProviderFactory;
+    let baseProvider: SystemPromptProvider | undefined;
+    if (factory) {
+      const inner = factory(this.sessionId);
+      baseProvider = loaded.composeSessionSystemPromptProvider?.(inner, {
+        sessionKey: this.sessionId,
+        sessionType: 'catscompany',
+      }) || inner;
+    } else {
+      baseProvider = loaded.RuntimeFactory.createSessionSystemPromptProvider?.(
+        adapter.profile,
+        this.sessionId,
+        'catscompany',
+      );
+    }
     bundle.session.setSystemPromptProvider(async () => {
       const base = baseProvider ? await baseProvider() : '';
       if (isHelperSession(this.sessionId)) {
         return composeHelperPrompt(typeof base === 'string' ? base : '', this.helperLastUser);
       }
-      // General agent: keep XiaoBa's base prompt but enforce English replies.
       return `${AGENT_LANGUAGE}\n\n${typeof base === 'string' ? base : ''}`.trim();
     });
   }
@@ -612,20 +714,23 @@ export class AgentHost {
     this.envStamp = stamp;
     this.error = undefined;
     const loaded = loadMods();
-    const profile = loaded.resolveRuntimeProfileFromConfig({
-      surface: 'cli',
+    // Same knobs as CatsCo's createCatsCompanyRuntime — local, no cloud bot.
+    const adapter = loaded.createAdapterRuntime({
+      surface: 'catscompany',
       workingDirectory: next,
-    }).profile;
+      promptSnapshotMode: 'mutable-identity',
+    });
     const bundle = await loaded.RuntimeFactory.createSession({
-      profile,
+      profile: adapter.profile,
       sessionKey: this.sessionId,
-      sessionType: 'cli',
+      sessionType: 'catscompany',
       loadSkills: false,
     });
-    this.attachHelperPrompt(loaded, profile, bundle);
+    this.attachSessionPrompt(loaded, bundle, adapter);
     if (restore) bundle.session.restoreFromStore?.();
+    seedDisplayHistory(this.sessionId);
     if (bundle.profile.skills.enabled) {
-      await loaded.RuntimeFactory.loadSkills(bundle.services.skillManager);
+      await adapter.loadSkills();
     }
     this.applyModel(bundle.services.aiService.getConfig());
     this.bundle = bundle;
@@ -634,91 +739,126 @@ export class AgentHost {
   async send(text: string): Promise<void> {
     const message = text.trim();
     if (!message) return;
-    if (isHelperSession(this.sessionId)) this.helperLastUser = message;
+    const gen = this.runGen;
+    const sid = this.sessionId;
+    if (isHelperSession(sid)) this.helperLastUser = message;
     if (this.sending || this.bundle?.session.isBusy()) {
       this.emit({ type: 'error', message: 'Agent is already running.' });
       return;
     }
-    try {
-      await this.ensureSession(this.resolveCwd());
-      this.emitReady(this.cwd, false);
-    } catch (err) {
-      const text = err instanceof Error ? err.message : String(err);
-      this.emit({ type: 'error', message: text });
-      return;
-    }
-    if (!this.bundle) {
-      this.emit({ type: 'error', message: this.error || 'Agent is not ready.' });
-      return;
-    }
-    const session = this.bundle.session;
-    const cwd = this.cwd;
     this.sending = true;
     this.status = 'running';
-    this.emit({ type: 'user', text: message });
-    this.emit({ type: 'status', state: 'running' });
-    await this.tracker.captureGitBaseline(cwd);
-    const fileTools = new Set(['write_file', 'edit_file']);
-    let lastWrite: string | null = null;
-    let streamed = false;
+    let cwd = this.cwd;
+    let assistant = '';
+    let assistantSaved = false;
+    const saveAssistant = () => {
+      if (assistantSaved || !assistant.trim()) return;
+      appendDisplayHistory(sid, { role: 'assistant', text: assistant });
+      assistantSaved = true;
+    };
     try {
+      const session = await this.withSessionLock(async () => {
+        if (!this.isCurrentRun(gen, sid)) return null;
+        await this.ensureSession(this.resolveCwd());
+        if (!this.isCurrentRun(gen, sid) || !this.bundle) return null;
+        cwd = this.cwd;
+        return this.bundle.session;
+      });
+      if (!this.isCurrentRun(gen, sid)) return;
+      if (!session) {
+        this.emit({ type: 'error', message: this.error || 'Agent is not ready.' });
+        return;
+      }
+      this.emitReady(cwd, false);
+      // Persist the user turn immediately. XiaoBa's own JSONL only rewrites at
+      // end-of-turn (or interrupt), and compaction can replace older lines.
+      seedDisplayHistory(sid);
+      appendDisplayHistory(sid, { role: 'user', text: message });
+      this.emit({ type: 'user', text: message });
+      this.emit({ type: 'status', state: 'running' });
+      this.emitSessions();
+      await this.tracker.captureGitBaseline(cwd);
+      const fileTools = new Set(['write_file', 'edit_file']);
+      let lastWrite: string | null = null;
+      let streamed = false;
+      const mine = () => this.isCurrentRun(gen, sid);
+      const turn = localCatscoTurn(sid);
       const result = await session.handleMessage(message, {
-        onText: (chunk: string) => {
-          if (chunk) {
+        ...turn,
+        callbacks: {
+          onText: (chunk: string) => {
+            if (!chunk) return;
+            assistant += chunk;
+            if (!mine()) return;
             streamed = true;
             this.emit({ type: 'text', text: chunk });
-          }
-        },
-        onToolStart: async (name: string, id: string, input: unknown) => {
-          this.emit({ type: 'tool_start', name, id, input });
-          if (fileTools.has(name)) {
-            lastWrite = toolPath(input as Record<string, unknown>, cwd);
-          }
-        },
-        onToolEnd: async (name: string, id: string, result: string) => {
-          const print = clipToolPrint(typeof result === 'string' ? result : '');
-          if (id && print && !isStubbedToolPrint(print)) {
-            this.toolPrint.set(`${this.sessionId}\0${id}`, print);
-          }
-          this.emit({ type: 'tool_end', name, id, ok: true, result: print });
-          if (fileTools.has(name) && lastWrite) {
-            await this.tracker.refresh(lastWrite);
-            this.emitChanges([lastWrite]);
-          }
-        },
-        confirmToolExecution: async (request: ToolConfirmRequest) => {
-          if (fileTools.has(request.toolName)) {
-            const target = toolPath(request.args, request.workingDirectory || cwd);
-            if (target) {
-              lastWrite = target;
-              await this.tracker.snapshotBeforeWrite(target);
+          },
+          onToolStart: async (name: string, id: string, input: unknown) => {
+            if (!mine()) return;
+            this.emit({ type: 'tool_start', name, id, input });
+            if (fileTools.has(name)) {
+              lastWrite = toolPath(input as Record<string, unknown>, cwd);
             }
-          }
-          return { approved: true };
+          },
+          onToolEnd: async (name: string, id: string, result: string) => {
+            const print = clipToolPrint(typeof result === 'string' ? result : '');
+            if (id && print && !isStubbedToolPrint(print)) {
+              this.toolPrint.set(`${sid}\0${id}`, print);
+            }
+            appendDisplayHistory(sid, { role: 'tool', name, text: print });
+            if (!mine()) return;
+            this.emit({ type: 'tool_end', name, id, ok: true, result: print });
+            if (fileTools.has(name) && lastWrite) {
+              await this.tracker.refresh(lastWrite);
+              if (mine()) this.emitChanges([lastWrite]);
+            }
+          },
+          confirmToolExecution: async (request: ToolConfirmRequest) => {
+            if (!mine()) return { approved: false };
+            if (fileTools.has(request.toolName)) {
+              const target = toolPath(request.args, request.workingDirectory || cwd);
+              if (target) {
+                lastWrite = target;
+                await this.tracker.snapshotBeforeWrite(target);
+              }
+            }
+            return { approved: true };
+          },
         },
       });
-      if (!streamed && result?.text) this.emit({ type: 'text', text: result.text });
+      if (!streamed && result?.text) {
+        assistant = result.text;
+        if (mine()) this.emit({ type: 'text', text: result.text });
+      }
+      saveAssistant();
+      if (!mine()) return;
       await this.tracker.harvestGitExtras(cwd);
+      if (!mine()) return;
       this.emitChanges(this.tracker.list().map((item) => item.path));
       this.status = 'idle';
       this.emit({ type: 'status', state: 'idle' });
       this.emitSessions();
     } catch (err) {
+      saveAssistant();
+      if (!this.isCurrentRun(gen, sid)) return;
       const messageText = err instanceof Error ? err.message : String(err);
       this.status = 'error';
       this.emit({ type: 'error', message: messageText });
       this.emit({ type: 'status', state: 'error', message: messageText });
       try {
         const extras = await this.tracker.harvestGitExtras(cwd);
-        this.emitChanges(extras);
+        if (this.isCurrentRun(gen, sid)) this.emitChanges(extras);
       } catch {
         // ignore
       }
     } finally {
-      this.sending = false;
-      if (this.status === 'running') {
-        this.status = 'idle';
-        this.emit({ type: 'status', state: 'idle' });
+      saveAssistant();
+      if (this.runGen === gen) {
+        this.sending = false;
+        if (this.status === 'running') {
+          this.status = 'idle';
+          this.emit({ type: 'status', state: 'idle' });
+        }
       }
     }
   }
@@ -727,20 +867,32 @@ export class AgentHost {
     this.bundle?.session.requestInterrupt();
   }
 
-  private async switchTo(id: string, restore: boolean): Promise<void> {
-    this.bundle?.session.requestInterrupt();
-    if (this.bundle?.session.cleanup) {
-      try { await this.bundle.session.cleanup(); } catch { /* ignore */ }
-    }
-    this.bundle = null;
-    this.sessionId = id;
-    writeActiveSessionId(id);
+  /** Next message rebuilds the XiaoBa session so a saved model/key is picked up. */
+  dropLlmCache(): void {
     this.envStamp = '';
-    try {
-      await this.ensureSession(this.resolveCwd(), restore);
-    } catch (err) {
-      this.error = err instanceof Error ? err.message : String(err);
-    }
+  }
+
+  private async switchTo(id: string, restore: boolean): Promise<void> {
+    // Drop any in-flight send before touching the bundle. WS handlers are not serialized.
+    this.runGen += 1;
+    this.sending = false;
+    this.status = 'idle';
+    this.bundle?.session.requestInterrupt();
+    await this.withSessionLock(async () => {
+      const prev = this.bundle;
+      this.bundle = null;
+      if (prev?.session.cleanup) {
+        try { await prev.session.cleanup(); } catch { /* ignore */ }
+      }
+      this.sessionId = id;
+      writeActiveSessionId(id);
+      this.envStamp = '';
+      try {
+        await this.ensureSession(this.resolveCwd(), restore);
+      } catch (err) {
+        this.error = err instanceof Error ? err.message : String(err);
+      }
+    });
     this.status = 'idle';
     this.emitReady();
   }
@@ -803,6 +955,7 @@ export class AgentHost {
   clear(): void {
     if (isHelperSession(this.sessionId)) this.helperLastUser = '';
     this.forgetToolPrints(this.sessionId);
+    unlinkDisplayHistory(this.sessionId);
     this.bundle?.session.requestInterrupt();
     if (this.bundle?.session.clear) this.bundle.session.clear();
     else this.bundle?.session.reset();
