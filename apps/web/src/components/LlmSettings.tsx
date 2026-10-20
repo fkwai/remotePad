@@ -1,10 +1,17 @@
 import { useEffect, useState } from 'react';
-import { LLM_DEFAULT_BASE, LLM_DEFAULT_MODEL, LLM_MODELS, type LlmSettingsView } from '@remotepad/shared';
+import {
+  LLM_DEFAULT_BASE,
+  LLM_DEFAULT_MAX_TOKENS,
+  LLM_DEFAULT_MODEL,
+  LLM_MODELS,
+  type LlmSettingsView,
+} from '@remotepad/shared';
 import { api } from '../api';
 
 export function LlmSettings() {
   const [model, setModel] = useState(LLM_DEFAULT_MODEL);
   const [apiBase, setApiBase] = useState(LLM_DEFAULT_BASE);
+  const [maxTokens, setMaxTokens] = useState(String(LLM_DEFAULT_MAX_TOKENS));
   const [apiKey, setApiKey] = useState('');
   const [hasKey, setHasKey] = useState(false);
   const [keyHint, setKeyHint] = useState('');
@@ -18,6 +25,7 @@ export function LlmSettings() {
         if (!live) return;
         setModel(view.model);
         setApiBase(view.apiBase);
+        setMaxTokens(String(view.maxTokens ?? LLM_DEFAULT_MAX_TOKENS));
         setHasKey(view.hasKey);
         setKeyHint(view.keyHint);
       })
@@ -31,16 +39,19 @@ export function LlmSettings() {
     setBusy(true);
     setNote('');
     try {
+      const parsed = Number(maxTokens.trim());
       const view = await api<LlmSettingsView>('/api/llm', {
         method: 'PUT',
         body: JSON.stringify({
           model: model.trim() || LLM_DEFAULT_MODEL,
           apiBase: apiBase.trim() || LLM_DEFAULT_BASE,
           apiKey: apiKey.trim(),
+          maxTokens: Number.isFinite(parsed) ? parsed : LLM_DEFAULT_MAX_TOKENS,
         }),
       });
       setModel(view.model);
       setApiBase(view.apiBase);
+      setMaxTokens(String(view.maxTokens));
       setHasKey(view.hasKey);
       setKeyHint(view.keyHint);
       setApiKey('');
@@ -72,6 +83,19 @@ export function LlmSettings() {
         API base
         <input type="text" value={apiBase} spellCheck={false} onChange={(event) => setApiBase(event.target.value)} />
       </label>
+      <label>
+        Max output tokens
+        <input
+          type="number"
+          min={256}
+          max={128000}
+          step={256}
+          value={maxTokens}
+          spellCheck={false}
+          onChange={(event) => setMaxTokens(event.target.value)}
+        />
+      </label>
+      <div className="kv">Per-completion output cap (default {LLM_DEFAULT_MAX_TOKENS}). Raise if the agent hits empty max_tokens.</div>
       <label>
         API key
         <input

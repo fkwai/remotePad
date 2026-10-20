@@ -363,7 +363,7 @@ export function AgentPanel({
                     >
                       <span className="agent-tool-chevron">{open ? '▾' : '▸'}</span>
                       <span className="agent-tool-name">{tool.name || 'tool'}</span>
-                      {!open && print && <span className="agent-tool-hint">output</span>}
+                      {!open && print && <span className="agent-tool-hint">{toolPreview(print)}</span>}
                       {open && (
                         <span className="agent-tool-detail">
                           {print || tool.input || 'No output kept in the session file.'}
@@ -592,6 +592,11 @@ function toolPrint(tool: AgentChatMessage): string {
   const text = tool.text?.trim() ?? '';
   if (!text || isStubbedToolPrint(text)) return '';
   return tool.text;
+}
+
+function toolPreview(text: string): string {
+  const line = text.split('\n').map((item) => item.trim()).find(Boolean) || 'output';
+  return line.length > 72 ? `${line.slice(0, 71)}…` : line;
 }
 
 function groupTurns(messages: AgentChatMessage[]): Turn[] {

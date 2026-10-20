@@ -54,7 +54,7 @@ UI regions (product names): **Sidebar** (left), **Editor** (middle top), **Termi
 | Workspaces / Repos store | `~/.remotepad/workspaces.json` (server routes under `apps/server`) |
 | Favorites | `~/.remotepad/favorites.json` |
 | Host / ports | `settings.json` at install root (`host`, `port`, `uiPort`; env overrides) |
-| Agent model | `~/.remotepad/llm.json` (DeepSeek key + model; not in git). Host pop **Agent model** form. `GET/PUT /api/llm`. Applied over XiaoBa `.env` on the next Agent message. |
+| Agent model | `~/.remotepad/llm.json` (DeepSeek key + model + maxTokens; not in git). Host pop **Agent model** form. `GET/PUT /api/llm`. Default max output tokens `32768` → `GAUZ_LLM_MAX_TOKENS`. Applied over XiaoBa `.env` on the next Agent message. |
 | Viewer modules | `packages/shared/src/modules.ts` catalog; enabled flags in `~/.remotepad/modules.json`; `GET/PUT /api/modules`; Host pop (computer name) toggles load/unload. Core is always code + folder + diff. Optional: markdown, json, jsonl, csv, image, html, log. Disabled types open as code. New modules should `defaultOn: false`. |
 | UI session restore | `tmp/session.json` under this repo |
 | Shared protocol | `packages/shared/src/index.ts` |
@@ -94,6 +94,7 @@ If a job is about click / double-click / reveal / scroll, read this table first.
 | Editor **tab** | Files toggle | Right side of tab strip; opens a right column. Editor + scrollbar shrink together; closed = both flush to the pane edge |
 | Editor **body** | scrollbar | Flush with the editor’s right edge (no overview-ruler gutter); moves with the editor when Files is open |
 | Rendered view (md) | width | Fills the full editor width — no `max-width` cap on `.md-body` |
+| Rendered view (jsonl) | open / reload | Scrolls to the last record automatically (`JsonlView.tsx` `useLayoutEffect` on `.viewer`); Agent "Open session JSONL" included |
 | Editor **tab** | drag | to Terminal / Agent: insert path; to address bar or a new browser tab: open a tree + editor window (`?pad=`) |
 | Editor **tab** | close × | Far right, small hit; a 14px gap after the name; hover tints only the ×, not the file name |
 | Folder explorer | right-click | **Refresh** reloads this folder listing |
@@ -104,7 +105,7 @@ If a job is about click / double-click / reveal / scroll, read this table first.
 | Editor **body** | Shift+Enter (`.py`) | Dedent selection and wrap in `exec(compile(...))` so REPL `if`/`else` blocks are not broken by blank lines; other languages paste raw |
 | Editor **body** (Monaco) | double-click | word select; not reveal-in-tree |
 | Editor **body** (PNG / HTML) | Ctrl+scroll | Zoom that preview only; does not zoom the browser page |
-| Host pop (computer name) | click | host / git / terminals · **Agent model** (DeepSeek key + model) · **Viewer modules** on/off |
+| Host pop (computer name) | click | host / git / terminals · **Agent model** (DeepSeek key + model + max output tokens) · **Viewer modules** on/off |
 | Editor **status** bar | `</>` on the left · `Ctrl/⌘+L` | toggle source / rendered for viewer modules; only bar besides the tab strip |
 | Editor **body** (image) | left click | pick a pixel; `x` `y` grey (plus RGB if color) on the same bottom status bar |
 | File tree rows | indent | chevron `>` and file marks share one column at the same depth (files must not sit extra-indented) |
@@ -118,17 +119,20 @@ If a job is about click / double-click / reveal / scroll, read this table first.
 | Agent **tab** | right-click | Open session JSONL · Rename · Close |
 | Agent history (`☰`) | toggle | docked right column that squeezes the chat (like the Files column); each row shows only a delete icon; JSONL / Rename live in the row's right-click menu (Rename hint `Dbl-click`) |
 | Agent compose | — | pinned at bottom (never clipped); input stays enabled while running |
-| Agent transcript | — | You / Agent roles; tool rows start folded (▸) with live print inside — expand to read output before XiaoBa stubs it in the JSONL; a jump-to-bottom ↓ button appears once you scroll up more than one viewport from the bottom |
+| Agent transcript | — | You / Agent roles; tool rows start folded (▸) and show the first line of the saved print — expand for the full output RemotePad kept (XiaoBa's session file may only have a stub); a jump-to-bottom ↓ button appears once you scroll up more than one viewport from the bottom |
 | Helper | Refresh | wipe this Helper chat in place (git + this file keep the work); does not spawn a new helper |
 | Agent `+` | click | new general `rp-*` session (cwd follows the selected repo) |
 
 ## Agent sessions
 
 - Runtime: local XiaoBa **catscompany** surface (`createAdapterRuntime` + mutable-identity prompts). Not the CatsCo web connector (no login/users/WS bot). LLM from Host **Agent model** / `~/.remotepad/llm.json`.
+- Turn end: like CatsCo, always surface XiaoBa `result.text` when `visibleToUser` — including cancel (`已停止…`), fail, and empty-`max_tokens` notices after a partial stream. Track spoken text across tool flushes so a final notice is not dropped when earlier assistant text already streamed. Wire `onThinking` (compaction start/done) into the panel. Do not go idle silently.
 - Normal sessions: id `rp-*` (or legacy `remotepad`); cwd follows active repo or tree root.
 - Helper sessions: id `helper` (legacy) or `helper-*`; cwd is always `repoRoot`. **Refresh** wipes the current Helper chat. Close / delete like any other session. Clicking a Repos row updates `rp-*` cwd only — it does not reload Helper (or any open) chat.
 - Switching Agent tabs abandons an in-flight run (`runGen` + session lock in `host.ts`); the new tab must not stay stuck on Working / “already running”.
-- Panel transcript (Open session JSONL): `~/.remotepad/history/{id}.jsonl` — append-only; user lines are written as soon as Send is accepted. XiaoBa's compactable context stays at `~/.remotepad/xiaoba/data/sessions/{id}.jsonl`.
+- ChangeTracker is per session (`trackers` map + `get tracker()`); never call `.list()` on a missing tracker.
+- **Stop** must abandon the same way (`runGen++`, `sending=false`, idle, then `requestInterrupt`) and surface `已停止当前请求。` — interrupt alone waits on the provider abort and leaves Working stuck.
+- Two stores, same split as CatsCo: the panel transcript is what was delivered (`~/.remotepad/history/{id}.jsonl`, append-only, user line on Send, assistant text flushed before each tool, full tool print). XiaoBa's model context is only `~/.remotepad/xiaoba/data/sessions/{id}.jsonl` — it rewrites the whole file and stubs tool results after hidden reasoning (`历史工具结果已省略`). Do not copy that file into the panel transcript. `~/.remotepad/xiaoba/logs/` is the process logger, not a third chat.
 - Active id / titles: `~/.remotepad/agent-active.json`
 
 ## Git

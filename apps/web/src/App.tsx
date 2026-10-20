@@ -1352,7 +1352,10 @@ export function App() {
                 setAgentMessages((prev) => [...prev, { id: agentMsgId.current++, role: 'user', text: clean }]);
                 sendAgent({ type: 'send', text: clean });
               }}
-              onStop={() => sendAgent({ type: 'stop' })}
+              onStop={() => {
+                setAgentState('idle');
+                sendAgent({ type: 'stop' });
+              }}
               onClear={() => {
                 setAgentMessages([]);
                 sendAgent({ type: 'clear' });

@@ -203,6 +203,10 @@ export interface AgentChange {
   kind: AgentChangeKind;
   diff: string;
   binary?: boolean;
+  /** Full text before the edit (text files only); for line-level keep/undo. */
+  before?: string;
+  /** Full text after the edit (text files only). */
+  after?: string;
 }
 
 export type AgentStatus = 'idle' | 'running' | 'error';
@@ -243,7 +247,9 @@ export type AgentClientMessage =
   | { type: 'accept'; path: string }
   | { type: 'undo'; path: string }
   | { type: 'accept_all' }
-  | { type: 'undo_all' };
+  | { type: 'undo_all' }
+  /** Write a line-edited body back for one tracked file (per-line keep/undo). */
+  | { type: 'apply'; path: string; content: string };
 
 export type AgentServerMessage =
   | {
@@ -262,7 +268,8 @@ export type AgentServerMessage =
   | { type: 'tool_start'; name: string; id?: string; input?: unknown; sessionId?: string }
   | { type: 'tool_end'; name: string; id?: string; ok?: boolean; result?: string; sessionId?: string }
   | { type: 'status'; state: AgentStatus; message?: string; sessionId?: string }
-  | { type: 'changes'; files: AgentChange[]; touched?: string[] }
+  /** Only ever for one session: the panel must not show another chat's edits. */
+  | { type: 'changes'; files: AgentChange[]; touched?: string[]; sessionId?: string }
   | { type: 'error'; message: string; sessionId?: string };
 
 export const TEXT_SIZE_LIMIT = 8 * 1024 * 1024;
@@ -291,6 +298,7 @@ export {
 
 export {
   LLM_DEFAULT_BASE,
+  LLM_DEFAULT_MAX_TOKENS,
   LLM_DEFAULT_MODEL,
   LLM_MODELS,
   type LlmSettingsPut,

@@ -254,7 +254,7 @@ The Repos list shows a compact HEAD line for each repo (`branch ↑n ↓n *dirty
 
 The right dock defaults to **Agent**. It embeds XiaoBa from `REMOTEPAD_XIAOBA_PATH` on the same **catscompany** runtime surface CatsCo uses (`createAdapterRuntime` + local p2p turn scope), without the CatsCo web connector, accounts, or multi-user chat. Session data for this panel is isolated under `~/.remotepad/xiaoba`.
 
-Each Agent conversation is a XiaoBa session. The panel transcript (right-click → **Open session JSONL**) is append-only at `~/.remotepad/history/{id}.jsonl` and records each Send immediately. XiaoBa's model context is a separate, compactable file at `~/.remotepad/xiaoba/data/sessions/{id}.jsonl`, with runtime state in `~/.remotepad/xiaoba/data/session-state/{id}.json`. The active session id and custom titles are in `~/.remotepad/agent-active.json`. Reloading the page restores the active session into both the model context and the chat panel.
+Each Agent conversation follows the CatsCo split. The panel transcript (right-click → **Open session JSONL**) is what was delivered to the chat, at `~/.remotepad/history/{id}.jsonl`. XiaoBa's model context is a separate file it rewrites itself, `~/.remotepad/xiaoba/data/sessions/{id}.jsonl`, with runtime state in `~/.remotepad/xiaoba/data/session-state/{id}.json`. The active session id and custom titles are in `~/.remotepad/agent-active.json`. Reloading the page restores the model context from XiaoBa and the chat panel from the delivered transcript.
 
 The Agent panel is a full-height right dock. Open sessions appear as **tabs** along the top. **+** starts a new session without deleting the others. **☰** opens history to switch, rename, or delete any session. Closing a tab hides it from the strip; the JSONL stays on disk until you Delete. Changed files show as a compact list at the bottom of the panel (`M path +n −n`) with Keep/Undo; click a row for the full diff. Host / git / terminals / viewer modules open from the computer name in the top-right. Each file-type preview (image, markdown, HTML, JSON, CSV, log) is an optional module; turn it off there (or in `~/.remotepad/modules.json`) and those files open as code.
 
@@ -264,7 +264,7 @@ Requirements:
 
 - XiaoBa-CLI installed next to RemotePad (or `REMOTEPAD_XIAOBA_PATH`)
 - `npm run build` in XiaoBa-CLI, or a `src/` tree that `tsx` can load
-- LLM config: click the computer name → **Agent model** (saved in `~/.remotepad/llm.json`), or `xiaoba config` / `GAUZ_LLM_*` in XiaoBa-CLI `.env` when that file is absent
+- LLM config: click the computer name → **Agent model** (key, model, API base, max output tokens; saved in `~/.remotepad/llm.json`, default max tokens `32768`), or `xiaoba config` / `GAUZ_LLM_*` in XiaoBa-CLI `.env` when that file is absent
 - Not a CatsCo login client — single-user local Agent only
 
 Normal agent sessions work in the active repo, or the file-tree root if none is selected. File edits are snapshotted so you can **Accept** or **Undo** them in the panel or in a diff tab. Shell side effects are not undone.
@@ -278,3 +278,28 @@ remotepad/
   packages/shared
   samples        viewer fixtures
 ```
+
+## TODO
+
+### JS debugger (Node / CDP)
+
+Goal: treat the debugger as a way to **understand code** on any project on the server — not a Cursor clone, and not RemotePad-specific.
+
+**MVP keep**
+
+- **Stop here** — gutter click or editor right-click; hotkey hint (e.g. `F9`)
+- **Debug this file** — launch under Node inspector for any absolute path (cwd = that file’s folder / matching repo)
+- **Terminal playground** — when paused, type expressions / snippets and eval in the paused frame (soft REPL; no Variables / Watch panels)
+- **Call Stack** — list frames; **click a frame (including parents) → open that file/line in the Editor**
+
+**Skip for now**
+
+- Variables / Watch sidebars
+- Full VS Code DAP / `vscode-js-debug` embedding
+- Browser / Chromium attach
+- Sourcemaps for bundled apps
+- Attach to arbitrary already-running processes (can follow later)
+
+**Approach:** Chrome DevTools Protocol (CDP) against `node --inspect` — structured `callFrames` for stack jump + `Debugger.evaluateOnCallFrame` for the Terminal playground. Continue / step can stay as Terminal / small controls (`c` / `n` / `s` / `o`) at first.
+
+**Gestures (when built):** right-click editor → Stop here / Debug file; on pause → Editor jumps to line, Call Stack fills, Terminal ready to type.

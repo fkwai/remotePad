@@ -1644,6 +1644,11 @@ button.tree-node:hover { border-color: transparent; }
   flex: 0 0 auto;
 }
 .agent-tool-hint {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   color: var(--faint);
   font-size: 10px;
 }

@@ -31,12 +31,33 @@ export class ChangeTracker {
     this.dropIgnored();
     return [...this.entries.entries()]
       .sort(([a], [b]) => a.localeCompare(b))
-      .map(([filePath, entry]) => ({
-        path: filePath,
-        kind: kindOf(entry),
-        binary: entry.original.binary || entry.current.binary,
-        diff: entry.diff,
-      }));
+      .map(([filePath, entry]) => {
+        const change: AgentChange = {
+          path: filePath,
+          kind: kindOf(entry),
+          binary: entry.original.binary || entry.current.binary,
+          diff: entry.diff,
+        };
+        // Full text lets the editor render a line-level diff with keep / undo per line.
+        const before = snapText(entry.original);
+        const after = snapText(entry.current);
+        if (before !== undefined && after !== undefined) {
+          change.before = before;
+          change.after = after;
+        }
+        return change;
+      });
+  }
+
+  /** Writes a line-edited version of a tracked file and re-diffs it. */
+  async applyContent(filePath: string, content: string): Promise<string | null> {
+    const abs = path.resolve(filePath);
+    const entry = this.entries.get(abs);
+    if (!entry || isRuntimePath(abs)) return null;
+    if (entry.original.binary || entry.current.binary) return null;
+    await fs.writeFile(abs, content, 'utf8');
+    await this.refresh(abs);
+    return abs;
   }
 
   async snapshotBeforeWrite(filePath: string): Promise<void> {
@@ -279,6 +300,13 @@ function kindOf(entry: Pick<Entry, 'original' | 'current'>): AgentChangeKind {
   if (entry.original.missing && !entry.current.missing) return 'create';
   if (!entry.original.missing && entry.current.missing) return 'delete';
   return 'modify';
+}
+
+/** Text body for the change list; undefined when binary / not useful for line diff. */
+function snapText(snap: Snap): string | undefined {
+  if (snap.binary) return undefined;
+  if (snap.missing) return '';
+  return snap.text ?? '';
 }
 
 async function unifiedDiff(filePath: string, before: string | null, after: string | null): Promise<string> {

@@ -21,8 +21,14 @@ type ToolConfirmRequest = {
 
 type SystemPromptProvider = () => Promise<string> | string;
 
+type HandleMessageResult = {
+  text?: string;
+  visibleToUser?: boolean;
+  taskOutcome?: 'completed' | 'failed' | 'cancelled';
+};
+
 type XiaobaSession = {
-  handleMessage: (text: string, opts: Record<string, unknown>) => Promise<{ text?: string }>;
+  handleMessage: (text: string, opts: Record<string, unknown>) => Promise<HandleMessageResult>;
   requestInterrupt: () => void;
   reset: () => void;
   clear?: () => boolean;
@@ -31,6 +37,17 @@ type XiaobaSession = {
   cleanup?: () => Promise<void>;
   setSystemPromptProvider?: (provider: SystemPromptProvider) => void;
 };
+
+/** Match CatsCo: classify a returned turn when taskOutcome is missing. */
+function turnOutcome(result: HandleMessageResult | undefined): 'completed' | 'failed' | 'cancelled' {
+  if (result?.taskOutcome === 'failed' || result?.taskOutcome === 'cancelled' || result?.taskOutcome === 'completed') {
+    return result.taskOutcome;
+  }
+  const text = String(result?.text || '');
+  if (text.startsWith('已停止当前请求')) return 'cancelled';
+  if (text.startsWith('处理消息时出错:')) return 'failed';
+  return 'completed';
+}
 
 type XiaobaBundle = {
   profile: { skills: { enabled: boolean }; workingDirectory?: string };
@@ -324,9 +341,9 @@ function unlinkSessionFiles(sessionId: string): void {
   unlinkDisplayHistory(sessionId);
 }
 
-// RemotePad keeps its own append-only transcript so the Agent panel keeps the
-// user-visible history even when XiaoBa compacts the session JSONL (which
-// replaces older messages with a checkpoint summary and skips them on read).
+// Client transcript, same role as the CatsCo webapp chat store: only what was
+// delivered to the panel. XiaoBa's session JSONL is the model context and is
+// not copied here (it stubs tool results after hidden reasoning).
 function displayHistoryFile(sessionId: string): string {
   const safe = sessionId.replace(/[^a-zA-Z0-9_-]/g, '_');
   return path.join(os.homedir(), '.remotepad', 'history', `${safe}.jsonl`);
@@ -339,21 +356,6 @@ function appendDisplayHistory(sessionId: string, item: AgentHistoryItem): void {
     const fp = displayHistoryFile(sessionId);
     fs.mkdirSync(path.dirname(fp), { recursive: true });
     fs.appendFileSync(fp, JSON.stringify(item) + '\n');
-  } catch { /* ignore */ }
-}
-
-// On the first round of an existing session, copy what XiaoBa already persisted
-// into our append-only transcript so we don't drop older turns when we switch
-// the panel over to reading this file. XiaoBa's own JSONL is left untouched.
-function seedDisplayHistory(sessionId: string): void {
-  if (!sessionId) return;
-  const fp = displayHistoryFile(sessionId);
-  if (fs.existsSync(fp)) return;
-  const items = readHistory(sessionId);
-  if (items.length === 0) return;
-  try {
-    fs.mkdirSync(path.dirname(fp), { recursive: true });
-    fs.writeFileSync(fp, items.map((item) => JSON.stringify(item)).join('\n') + '\n');
   } catch { /* ignore */ }
 }
 
@@ -381,15 +383,13 @@ function readDisplayHistory(sessionId: string): AgentHistoryItem[] {
 }
 
 function readTranscriptHistory(sessionId: string, prints?: Map<string, string>): AgentHistoryItem[] {
-  seedDisplayHistory(sessionId);
   const display = readDisplayHistory(sessionId);
   if (display.length > 0) return display;
   return readHistory(sessionId, prints);
 }
 
-/** Prefer the append-only panel transcript; fall back to XiaoBa's compactable context file. */
+/** Client transcript when this panel has delivered turns; otherwise XiaoBa's context file. */
 function transcriptPath(sessionId: string): string {
-  seedDisplayHistory(sessionId);
   const display = displayHistoryFile(sessionId);
   if (fs.existsSync(display)) return display;
   return sessionFile(sessionId);
@@ -576,7 +576,8 @@ export class AgentHost {
   private envStamp = '';
   private sessionId = '';
   private helperLastUser = '';
-  readonly tracker = new ChangeTracker();
+  /** One tracker per session: a file touched by one chat must not show in another. */
+  private trackers = new Map<string, ChangeTracker>();
   private sending = false;
   /** Bumped on every session switch so an in-flight send cannot touch the new tab. */
   private runGen = 0;
@@ -584,6 +585,17 @@ export class AgentHost {
   private sessionLock: Promise<void> = Promise.resolve();
   /** Live tool prints, keyed by `${sessionId}\\0${toolCallId}`, kept until that session is deleted. */
   private toolPrint = new Map<string, string>();
+
+  /** Current session's change tracker (lazy). */
+  private get tracker(): ChangeTracker {
+    const id = this.sessionId || '_none';
+    let item = this.trackers.get(id);
+    if (!item) {
+      item = new ChangeTracker();
+      this.trackers.set(id, item);
+    }
+    return item;
+  }
 
   private withSessionLock<T>(fn: () => Promise<T>): Promise<T> {
     const run = this.sessionLock.then(fn, fn);
@@ -728,7 +740,6 @@ export class AgentHost {
     });
     this.attachSessionPrompt(loaded, bundle, adapter);
     if (restore) bundle.session.restoreFromStore?.();
-    seedDisplayHistory(this.sessionId);
     if (bundle.profile.skills.enabled) {
       await adapter.loadSkills();
     }
@@ -749,12 +760,15 @@ export class AgentHost {
     this.sending = true;
     this.status = 'running';
     let cwd = this.cwd;
-    let assistant = '';
-    let assistantSaved = false;
-    const saveAssistant = () => {
-      if (assistantSaved || !assistant.trim()) return;
-      appendDisplayHistory(sid, { role: 'assistant', text: assistant });
-      assistantSaved = true;
+    // Flush each spoken segment before the next tool so the history file keeps
+    // Agent text and the real tool print in the order they happened. XiaoBa's
+    // own session file later replaces those prints with a stub.
+    let pending = '';
+    const flushAssistant = () => {
+      const text = pending.trim();
+      pending = '';
+      if (!text) return;
+      appendDisplayHistory(sid, { role: 'assistant', text });
     };
     try {
       const session = await this.withSessionLock(async () => {
@@ -770,9 +784,8 @@ export class AgentHost {
         return;
       }
       this.emitReady(cwd, false);
-      // Persist the user turn immediately. XiaoBa's own JSONL only rewrites at
-      // end-of-turn (or interrupt), and compaction can replace older lines.
-      seedDisplayHistory(sid);
+      // Persist the user turn immediately, the way CatsCo delivers it to the client.
+      // XiaoBa still rewrites its own session file at end of turn.
       appendDisplayHistory(sid, { role: 'user', text: message });
       this.emit({ type: 'user', text: message });
       this.emit({ type: 'status', state: 'running' });
@@ -780,20 +793,47 @@ export class AgentHost {
       await this.tracker.captureGitBaseline(cwd);
       const fileTools = new Set(['write_file', 'edit_file']);
       let lastWrite: string | null = null;
-      let streamed = false;
+      // All assistant text already shown this turn (survives tool flushes). Used so
+      // CatsCo-style final result.text still lands when it is a *new* notice
+      // (max_tokens / stop) but is skipped when it would duplicate a streamed answer.
+      let spoken = '';
       const mine = () => this.isCurrentRun(gen, sid);
+      const deliverVisibleReply = (reply: string) => {
+        const text = reply.trim();
+        if (!text) return;
+        if (pending.includes(text) || spoken.includes(text)) {
+          flushAssistant();
+          return;
+        }
+        const chunk = spoken || pending.trim() ? `\n${text}` : text;
+        pending = pending.trim() ? `${pending}\n${text}` : text;
+        spoken += chunk;
+        if (mine()) this.emit({ type: 'text', text: chunk });
+        flushAssistant();
+      };
       const turn = localCatscoTurn(sid);
       const result = await session.handleMessage(message, {
         ...turn,
         callbacks: {
           onText: (chunk: string) => {
             if (!chunk) return;
-            assistant += chunk;
+            pending += chunk;
+            spoken += chunk;
             if (!mine()) return;
-            streamed = true;
             this.emit({ type: 'text', text: chunk });
           },
+          onThinking: async (thinking: string) => {
+            // Compaction / progress notices (CatsCo sendThinking). Show in the panel
+            // so context-full compress does not look like a silent hang.
+            const text = String(thinking || '').trim();
+            if (!text || !mine()) return;
+            flushAssistant();
+            appendDisplayHistory(sid, { role: 'assistant', text });
+            spoken += `\n${text}`;
+            this.emit({ type: 'text', text: `${text}\n` });
+          },
           onToolStart: async (name: string, id: string, input: unknown) => {
+            flushAssistant();
             if (!mine()) return;
             this.emit({ type: 'tool_start', name, id, input });
             if (fileTools.has(name)) {
@@ -826,20 +866,40 @@ export class AgentHost {
           },
         },
       });
-      if (!streamed && result?.text) {
-        assistant = result.text;
-        if (mine()) this.emit({ type: 'text', text: result.text });
+      if (!mine()) {
+        flushAssistant();
+        return;
       }
-      saveAssistant();
-      if (!mine()) return;
+      // CatsCo always delivers visibleToUser result.text into the chat, including
+      // cancel/fail/max_tokens notices after a partial stream. Do not go idle silently.
+      const outcome = turnOutcome(result);
+      const reply = typeof result?.text === 'string' ? result.text.trim() : '';
+      const showReply = Boolean(reply) && result?.visibleToUser !== false;
+      if (outcome === 'failed') {
+        const notice = showReply ? reply : 'Agent turn failed.';
+        deliverVisibleReply(notice);
+        this.status = 'error';
+        // One chat line + error banner (same role as CatsCo's visible failure reply).
+        this.emit({ type: 'error', message: notice });
+        this.emit({ type: 'status', state: 'error', message: notice });
+      } else if (outcome === 'cancelled') {
+        const notice = showReply ? reply : 'Stopped.';
+        if (showReply) deliverVisibleReply(notice);
+        else this.emit({ type: 'error', message: notice });
+        this.status = 'idle';
+        this.emit({ type: 'status', state: 'idle', message: 'stopped' });
+      } else {
+        if (showReply) deliverVisibleReply(reply);
+        else flushAssistant();
+        this.status = 'idle';
+        this.emit({ type: 'status', state: 'idle' });
+      }
       await this.tracker.harvestGitExtras(cwd);
       if (!mine()) return;
       this.emitChanges(this.tracker.list().map((item) => item.path));
-      this.status = 'idle';
-      this.emit({ type: 'status', state: 'idle' });
       this.emitSessions();
     } catch (err) {
-      saveAssistant();
+      flushAssistant();
       if (!this.isCurrentRun(gen, sid)) return;
       const messageText = err instanceof Error ? err.message : String(err);
       this.status = 'error';
@@ -852,7 +912,7 @@ export class AgentHost {
         // ignore
       }
     } finally {
-      saveAssistant();
+      flushAssistant();
       if (this.runGen === gen) {
         this.sending = false;
         if (this.status === 'running') {
@@ -864,7 +924,20 @@ export class AgentHost {
   }
 
   stop(): void {
+    // Same abandon as tab-switch: bump runGen so the in-flight send drops, then
+    // interrupt XiaoBa. Only requestInterrupt() left the UI on Working until the
+    // provider abort finished (often tens of seconds) — Stop looked broken.
+    const live = this.status === 'running' || this.sending || Boolean(this.bundle?.session.isBusy());
+    this.runGen += 1;
+    this.sending = false;
+    this.status = 'idle';
     this.bundle?.session.requestInterrupt();
+    if (live) {
+      const notice = '已停止当前请求。';
+      appendDisplayHistory(this.sessionId, { role: 'assistant', text: notice });
+      this.emit({ type: 'text', text: notice });
+    }
+    this.emit({ type: 'status', state: 'idle', message: 'stopped' });
   }
 
   /** Next message rebuilds the XiaoBa session so a saved model/key is picked up. */
@@ -930,6 +1003,7 @@ export class AgentHost {
       this.envStamp = '';
     }
     this.forgetToolPrints(id);
+    this.trackers.delete(id);
     unlinkSessionFiles(id);
     const meta = readMeta();
     delete meta.titles[id];
