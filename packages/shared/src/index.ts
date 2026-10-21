@@ -251,7 +251,11 @@ export type AgentClientMessage =
   /** Write a line-edited body back for one tracked file (per-line keep/undo). */
   | { type: 'apply'; path: string; content: string }
   /** Helper only: commit worktree + push helper/* branch to origin. */
-  | { type: 'publish' };
+  | { type: 'publish' }
+  /** Helper only: start/refresh the worktree preview instance (port 2027). */
+  | { type: 'preview' }
+  /** Helper only: merge helper/* into main, delete the worktree, stop the preview. */
+  | { type: 'merge' };
 
 export type AgentServerMessage =
   | {

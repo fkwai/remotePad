@@ -1,6 +1,6 @@
 # RemotePad Helper brief
 
-You are the **Helper** session for RemotePad. You only edit the **Helper git worktree** (`~/.remotepad/helper-worktrees/<id>`), not the live install the user is running. Do not follow the file-tree or Repos selection in the UI for cwd.
+You are the **Helper** session for RemotePad. You only edit the **Helper git worktree** (`~/.remotepad/helper-worktrees/work`), not the live install the user is running. Do not follow the file-tree or Repos selection in the UI for cwd.
 
 ## Mission
 
@@ -24,7 +24,7 @@ Change RemotePad (layout, Agent panel, workspaces, viewers, terminal) when the u
 | editor / Monaco / code | editor **body** | `EditorArea.tsx` Monaco |
 | address bar | path field in the top chrome | `App.tsx` `goToAddress` |
 | Agent / Helper | right dock chat | `AgentPanel.tsx` |
-| Helper worktree / publish | `~/.remotepad/helper-worktrees/` + Commit & push | `helper-worktree.ts`, `host.ts` `publish` |
+| Helper worktree / preview / merge | one tree `~/.remotepad/helper-worktrees/work` + Preview 2027 + Merge → main | `helper-worktree.ts`, `host.ts` `preview`/`merge` |
 | pad window | tree + editor only | `App.tsx` `?pad=` |
 
 ## Layout
@@ -128,6 +128,8 @@ If a job is about click / double-click / reveal / scroll, read this table first.
 | Agent transcript | — | You / Agent roles; tool rows start folded (▸) and show the first line of the saved print — expand for the full output RemotePad kept (XiaoBa's session file may only have a stub); a jump-to-bottom ↓ button appears once you scroll up more than one viewport from the bottom |
 | Helper | Refresh | wipe this Helper chat in place (worktree + AGENTS.md keep the work); does not spawn a new helper |
 | Helper | Commit & push | stage + commit worktree + push `helper/*` to origin (one key) |
+| Helper | Preview 2027 | boot the worktree as a second instance (UI 2027, API 2028) seeded with this window's tabs |
+| Helper | Merge → main | commit+push, merge into live `main`, delete the merged worktree, stop the 2027 preview |
 | Agent `+` | click | new general `rp-*` session (cwd follows the selected repo) |
 
 ## Agent sessions
@@ -135,9 +137,10 @@ If a job is about click / double-click / reveal / scroll, read this table first.
 - Runtime: local XiaoBa **catscompany** surface (`createAdapterRuntime` + mutable-identity prompts). Not the CatsCo web connector (no login/users/WS bot). LLM from Host **Agent model** / `~/.remotepad/llm.json`.
 - Turn end: like CatsCo, always surface XiaoBa `result.text` when `visibleToUser` — including cancel (`已停止…`), fail, and empty-`max_tokens` notices after a partial stream. Track spoken text across tool flushes so a final notice is not dropped when earlier assistant text already streamed. Wire `onThinking` (compaction start/done) into the panel. Do not go idle silently.
 - Normal sessions: id `rp-*` (or legacy `remotepad`); cwd follows active repo or tree root.
-- Helper sessions: id `helper` (legacy) or `helper-*`. **cwd is a git worktree**, not the live install: `~/.remotepad/helper-worktrees/<id>` on branch `helper/<id>` (`apps/server/src/agent/helper-worktree.ts`). Live `repoRoot` stays what the user is running. **Refresh** wipes the Helper chat. Delete session also removes that worktree. Clicking a Repos row updates `rp-*` cwd only — it does not reload Helper.
+- Helper sessions: id `helper` (legacy) or `helper-*`. **cwd is one reusable git worktree**, not the live install: `~/.remotepad/helper-worktrees/work` on branch `helper/work` (`apps/server/src/agent/helper-worktree.ts`). Every Helper chat shares it — never create a tree per session, never a tree per edit. Live `repoRoot` stays what the user is running. **Refresh** wipes the Helper chat. Deleting a Helper chat does not delete the shared tree (only a merged tree is swept). Clicking a Repos row updates `rp-*` cwd only — it does not reload Helper.
 - **Commit & push** (Helper compose row): one-key `git add -A` + commit + `git push -u origin HEAD` for the helper branch. Never force-push; refuses `main`/`master`. Result lands as an Agent text/error line in the panel.
-- **Preview:** worktree `settings.json` uses offset ports (`3900+` / `5300+`). To try Helper’s build without touching live: in the worktree `pnpm install` (once) then `pnpm dev`. Promote by merging the pushed `helper/*` branch when you like it.
+- **Preview 2027:** the worktree `settings.json` is pinned to `port: 2028` / `uiPort: 2027` (`helperPreviewPorts`). The button seeds the worktree `tmp/session.json` from the live one with every live path rebased onto the worktree, runs `pnpm install` if `node_modules` is missing, then spawns `pnpm dev` detached in the worktree (log: `~/.remotepad/helper-preview.log`). So 2027 shows the same tabs/files as the live window, but reads and writes the worktree. Merge refuses to run from a preview instance.
+- **Merge → main:** commit+push the helper branch, `merge --ff-only` (fallback `--no-ff`) into live `main`, abort cleanly on conflict, then `stopHelperPreview` and sweep every worktree under `helper-worktrees/` whose branch is already merged into `main` (skips dirty trees, `branch -d`, `worktree prune`). The Helper cwd is reset so the next turn recreates `work` from the new `main`.
 - **Self-edit / `tsx watch`:** because Helper no longer writes the live tree, editing under the worktree does not restart the live Agent host. (If someone still points Helper at live, `pnpm dev:stable` avoids watch kills.)
 - Switching Agent tabs abandons an in-flight run (`runGen` + session lock in `host.ts`); the new tab must not stay stuck on Working / “already running”.
 - ChangeTracker is per session (`trackers` map + `get tracker()`); never call `.list()` on a missing tracker.
@@ -147,7 +150,7 @@ If a job is about click / double-click / reveal / scroll, read this table first.
 
 ## Git
 
-Helper work happens on `helper/<sessionId>` in a worktree. Use the panel **Commit & push** to publish that branch. Never push `main`. Never force-push. The user merges into live when ready.
+Helper work happens on `helper/work` in the one shared worktree. Flow: edit → **Preview 2027** → user tries it there → **Commit & push** (or straight to **Merge → main**) → merge lands it, deletes the worktree, stops 2027. Never push `main`. Never force-push.
 
 ## Grep / edit hygiene
 

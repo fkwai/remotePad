@@ -36,6 +36,8 @@ export function AgentPanel({
   onOpenDiff,
   onOpenSessionFile,
   onPublish,
+  onPreview,
+  onMerge,
 }: {
   cwd: string;
   error?: string;
@@ -59,6 +61,10 @@ export function AgentPanel({
   onOpenSessionFile?: (path: string) => void;
   /** Helper only: commit worktree + push to origin. */
   onPublish?: () => void;
+  /** Helper only: start the worktree preview instance on the preview ports. */
+  onPreview?: () => void;
+  /** Helper only: merge the worktree into main, delete it, stop the preview. */
+  onMerge?: () => void;
 }) {
   const logRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -75,6 +81,8 @@ export function AgentPanel({
   const [openTools, setOpenTools] = useState<Set<number>>(new Set());
   const [showJump, setShowJump] = useState(false);
   const [publishing, setPublishing] = useState(false);
+  const [previewing, setPreviewing] = useState(false);
+  const [merging, setMerging] = useState(false);
   const busy = state === 'running';
   const helperActive = isHelperSessionId(sessionId);
   const activeId = sessionId ?? '';
@@ -323,7 +331,7 @@ export function AgentPanel({
           {messages.length === 0 && !error && (
             <div className="agent-empty">
               {helperActive
-                ? `Helper edits a git worktree (not the live install). Cwd: ${cwd || '…'}. Commit & push publishes the helper/* branch. Refresh wipes this chat.`
+                ? `Helper edits one reusable git worktree (not the live install). Cwd: ${cwd || '…'}. Preview 2027 runs that tree as a second window, Commit & push publishes the branch, Merge → main lands it and deletes the tree. Refresh wipes this chat.`
                 : 'General Agent — cwd follows the selected repo (or the file-tree root). + starts another one. Helper stays in its own tab.'}
             </div>
           )}
@@ -506,6 +514,31 @@ export function AgentPanel({
                 window.setTimeout(() => setPublishing(false), 2500);
               }}
             >{publishing ? 'Pushing…' : 'Commit & push'}</button>
+          )}
+          {helperActive && onPreview && (
+            <button
+              className="ghost"
+              disabled={busy || previewing}
+              title="Run this worktree as its own RemotePad instance on the preview ports (2027) and open the same tabs as this window"
+              onClick={() => {
+                setPreviewing(true);
+                onPreview();
+                window.setTimeout(() => setPreviewing(false), 4000);
+              }}
+            >{previewing ? 'Starting…' : 'Preview 2027'}</button>
+          )}
+          {helperActive && onMerge && (
+            <button
+              className="ghost danger"
+              disabled={busy || merging}
+              title="Merge this worktree branch into main, delete the worktree and stop the preview instance"
+              onClick={() => {
+                if (!window.confirm('Merge the Helper worktree into main, delete the worktree and stop the 2027 preview?')) return;
+                setMerging(true);
+                onMerge();
+                window.setTimeout(() => setMerging(false), 4000);
+              }}
+            >{merging ? 'Merging…' : 'Merge → main'}</button>
           )}
           <span className="spacer" />
           {busy

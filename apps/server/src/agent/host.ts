@@ -11,8 +11,10 @@ import { ChangeTracker } from './changes.ts';
 import {
   ensureHelperWorktree,
   helperWorktreePath,
+  mergeHelperIntoMain,
   publishHelperWorktree,
   removeHelperWorktree,
+  startHelperPreview,
 } from './helper-worktree.ts';
 
 type Listener = (msg: AgentServerMessage) => void;
@@ -1092,6 +1094,52 @@ export class AgentHost {
     try {
       const result = await publishHelperWorktree(sid);
       if (result.ok) {
+        this.emit({ type: 'text', text: result.message, sessionId: sid });
+      } else {
+        this.emit({ type: 'error', message: result.message, sessionId: sid });
+      }
+    } catch (err) {
+      this.emit({
+        type: 'error',
+        message: err instanceof Error ? err.message : String(err),
+        sessionId: sid,
+      });
+    }
+  }
+
+  /** Helper only: start the worktree instance on the preview ports. */
+  async preview(): Promise<void> {
+    if (!isHelperSession(this.sessionId)) {
+      this.emit({ type: 'error', message: 'Preview is only for Helper sessions.' });
+      return;
+    }
+    const sid = this.sessionId;
+    this.emit({ type: 'status', state: this.status, message: 'starting preview', sessionId: sid });
+    try {
+      const result = await startHelperPreview(sid);
+      this.emit({ type: result.ok ? 'text' : 'error', ...(result.ok ? { text: result.message } : { message: result.message }), sessionId: sid } as AgentServerMessage);
+    } catch (err) {
+      this.emit({
+        type: 'error',
+        message: err instanceof Error ? err.message : String(err),
+        sessionId: sid,
+      });
+    }
+  }
+
+  /** Helper only: merge the worktree into main, delete trees, stop the preview. */
+  async merge(): Promise<void> {
+    if (!isHelperSession(this.sessionId)) {
+      this.emit({ type: 'error', message: 'Merge is only for Helper sessions.' });
+      return;
+    }
+    const sid = this.sessionId;
+    try {
+      const result = await mergeHelperIntoMain(sid);
+      if (result.ok) {
+        // The worktree is gone: force the next turn to recreate it from main.
+        this.cwd = '';
+        this.envStamp = '';
         this.emit({ type: 'text', text: result.message, sessionId: sid });
       } else {
         this.emit({ type: 'error', message: result.message, sessionId: sid });

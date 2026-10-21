@@ -23,6 +23,8 @@ export function RightDock({
   onOpenAgentDiff,
   onOpenSessionFile,
   onPublish,
+  onPreview,
+  onMerge,
 }: {
   cwd: string;
   error?: string;
@@ -45,6 +47,8 @@ export function RightDock({
   onOpenAgentDiff: (change: AgentChange) => void;
   onOpenSessionFile?: (path: string) => void;
   onPublish?: () => void;
+  onPreview?: () => void;
+  onMerge?: () => void;
 }) {
   return (
     <div className="pane">
@@ -70,6 +74,8 @@ export function RightDock({
         onOpenDiff={onOpenAgentDiff}
         onOpenSessionFile={onOpenSessionFile}
         onPublish={onPublish}
+        onPreview={onPreview}
+        onMerge={onMerge}
       />
     </div>
   );

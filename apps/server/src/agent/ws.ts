@@ -48,6 +48,10 @@ export async function registerAgentSocket(app: FastifyInstance) {
             await agentHost.undoAll();
           } else if (msg.type === 'publish') {
             await agentHost.publish();
+          } else if (msg.type === 'preview') {
+            await agentHost.preview();
+          } else if (msg.type === 'merge') {
+            await agentHost.merge();
           }
         } catch (err) {
           send(socket, { type: 'error', message: err instanceof Error ? err.message : String(err) });

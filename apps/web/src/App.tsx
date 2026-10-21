@@ -1392,6 +1392,8 @@ export function App() {
                 void openFile({ name: basename(path), path, kind: 'file' });
               }}
               onPublish={() => sendAgent({ type: 'publish' })}
+              onPreview={() => sendAgent({ type: 'preview' })}
+              onMerge={() => sendAgent({ type: 'merge' })}
             />
           </Panel>
           )}
