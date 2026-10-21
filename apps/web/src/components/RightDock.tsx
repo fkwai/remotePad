@@ -22,6 +22,7 @@ export function RightDock({
   onUndoAll,
   onOpenAgentDiff,
   onOpenSessionFile,
+  onPublish,
 }: {
   cwd: string;
   error?: string;
@@ -43,6 +44,7 @@ export function RightDock({
   onUndoAll: () => void;
   onOpenAgentDiff: (change: AgentChange) => void;
   onOpenSessionFile?: (path: string) => void;
+  onPublish?: () => void;
 }) {
   return (
     <div className="pane">
@@ -67,6 +69,7 @@ export function RightDock({
         onUndoAll={onUndoAll}
         onOpenDiff={onOpenAgentDiff}
         onOpenSessionFile={onOpenSessionFile}
+        onPublish={onPublish}
       />
     </div>
   );

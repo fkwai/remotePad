@@ -249,7 +249,9 @@ export type AgentClientMessage =
   | { type: 'accept_all' }
   | { type: 'undo_all' }
   /** Write a line-edited body back for one tracked file (per-line keep/undo). */
-  | { type: 'apply'; path: string; content: string };
+  | { type: 'apply'; path: string; content: string }
+  /** Helper only: commit worktree + push helper/* branch to origin. */
+  | { type: 'publish' };
 
 export type AgentServerMessage =
   | {

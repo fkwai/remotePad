@@ -8,6 +8,12 @@ import { isHelperSessionId } from '@remotepad/shared';
 import { config } from '../config.ts';
 import { applyLlmSettingsToEnv } from '../llm-settings.ts';
 import { ChangeTracker } from './changes.ts';
+import {
+  ensureHelperWorktree,
+  helperWorktreePath,
+  publishHelperWorktree,
+  removeHelperWorktree,
+} from './helper-worktree.ts';
 
 type Listener = (msg: AgentServerMessage) => void;
 
@@ -217,8 +223,8 @@ function ensureHelperMeta(meta = readMeta()): SessionMeta {
   return meta;
 }
 
-function readAgentsBrief(): string {
-  const fp = path.join(config.repoRoot, 'AGENTS.md');
+function readAgentsBrief(root = config.repoRoot): string {
+  const fp = path.join(root, 'AGENTS.md');
   try {
     if (!fs.existsSync(fp)) return '';
     return fs.readFileSync(fp, 'utf8').trim();
@@ -227,8 +233,7 @@ function readAgentsBrief(): string {
   }
 }
 
-function helperGitSnapshot(): string {
-  const root = config.repoRoot;
+function helperGitSnapshot(root: string): string {
   try {
     const status = execFileSync('git', ['-C', root, 'status', '--short', '--branch'], {
       encoding: 'utf8',
@@ -250,17 +255,17 @@ function isCheckpointUser(msg: { __checkpointSummary?: unknown; content?: unknow
 const AGENT_LANGUAGE =
   '## Language\n\nReply in English. The user writes in English; always respond in English unless the user writes in another language. Do not reply in Chinese.';
 
-function composeHelperPrompt(base: string, latestUser: string): string {
-  const brief = readAgentsBrief();
-  const status = helperGitSnapshot();
+function composeHelperPrompt(base: string, latestUser: string, worktree: string): string {
+  const brief = readAgentsBrief(worktree) || readAgentsBrief(config.repoRoot);
+  const status = helperGitSnapshot(worktree);
   const latest = latestUser.trim();
   const parts = [
     AGENT_LANGUAGE,
     base.trim(),
-    brief ? `## RemotePad helper brief\n\n${brief}` : '## RemotePad helper brief\n\nYou edit only the RemotePad repo at the fixed cwd.',
-    `## Helper process\n\nAGENTS.md is the product map. Chat JSONL is scratch. Refresh wipes this Helper chat; lasting work already lives in git and AGENTS.md.\nXiaoBa summaries are fine for older work. The latest user message is the current job — if a summary disagrees about what to change, follow that message and AGENTS.md.`,
+    brief ? `## RemotePad helper brief\n\n${brief}` : '## RemotePad helper brief\n\nYou edit only the Helper worktree.',
+    `## Helper process\n\nYou work in a **git worktree**, not the live RemotePad install the user is running.\n- Worktree (your cwd — edit here only): ${worktree}\n- Live install (do **not** edit): ${config.repoRoot}\nAGENTS.md in the worktree is the product map. Chat JSONL is scratch. Refresh wipes this Helper chat.\nThe user publishes with **Commit & push** (Helper toolbar) when they want your branch on origin. Do not push yourself unless asked.\nTo try a preview: in the worktree run \`pnpm install\` once if needed, then \`pnpm dev\` (ports come from that tree's settings.json).\nXiaoBa summaries are fine for older work. The latest user message is the current job — if a summary disagrees, follow that message and AGENTS.md.`,
     latest ? `## Latest user message (verbatim)\n\n${latest}` : '',
-    `## Live repo status\n\nRepo: ${config.repoRoot}\n\`\`\`\n${status}\n\`\`\``,
+    `## Worktree git status\n\n\`\`\`\n${status}\n\`\`\``,
   ];
   return parts.filter(Boolean).join('\n\n');
 }
@@ -586,6 +591,12 @@ export class AgentHost {
   /** Live tool prints, keyed by `${sessionId}\\0${toolCallId}`, kept until that session is deleted. */
   private toolPrint = new Map<string, string>();
 
+  /**
+   * Abs path -> session id that made it dirty. A file belongs to the chat that
+   * changed it first, so git harvest cannot leak it into another chat's list.
+   */
+  private owners = new Map<string, string>();
+
   /** Current session's change tracker (lazy). */
   private get tracker(): ChangeTracker {
     const id = this.sessionId || '_none';
@@ -661,7 +672,9 @@ export class AgentHost {
   }
 
   private resolveCwd(): string {
-    if (isHelperSession(this.sessionId)) return path.resolve(config.repoRoot);
+    if (isHelperSession(this.sessionId)) {
+      return path.resolve(helperWorktreePath(this.sessionId));
+    }
     return path.resolve(this.uiCwd || process.cwd());
   }
 
@@ -689,7 +702,11 @@ export class AgentHost {
     bundle.session.setSystemPromptProvider(async () => {
       const base = baseProvider ? await baseProvider() : '';
       if (isHelperSession(this.sessionId)) {
-        return composeHelperPrompt(typeof base === 'string' ? base : '', this.helperLastUser);
+        return composeHelperPrompt(
+          typeof base === 'string' ? base : '',
+          this.helperLastUser,
+          this.cwd || helperWorktreePath(this.sessionId),
+        );
       }
       return `${AGENT_LANGUAGE}\n\n${typeof base === 'string' ? base : ''}`.trim();
     });
@@ -713,9 +730,13 @@ export class AgentHost {
     loadXiaobaEnv();
     ensureHelperMeta();
     if (!this.sessionId) this.sessionId = readActiveSessionId();
-    const next = isHelperSession(this.sessionId)
-      ? path.resolve(config.repoRoot)
-      : path.resolve(cwd || this.uiCwd || process.cwd());
+    let next: string;
+    if (isHelperSession(this.sessionId)) {
+      const wt = await ensureHelperWorktree(this.sessionId);
+      next = path.resolve(wt.path);
+    } else {
+      next = path.resolve(cwd || this.uiCwd || process.cwd());
+    }
     const stamp = llmFingerprint();
     if (this.bundle && this.cwd === next && this.envStamp === stamp) return;
     if (this.bundle?.session.cleanup) {
@@ -1005,6 +1026,9 @@ export class AgentHost {
     this.forgetToolPrints(id);
     this.trackers.delete(id);
     unlinkSessionFiles(id);
+    if (isHelperSession(id)) {
+      await removeHelperWorktree(id).catch(() => undefined);
+    }
     const meta = readMeta();
     delete meta.titles[id];
     meta.ids = meta.ids.filter((item) => item !== id);
@@ -1056,6 +1080,29 @@ export class AgentHost {
   async undoAll(): Promise<void> {
     const touched = await this.tracker.undoAll();
     this.emitChanges(touched);
+  }
+
+  /** One-key: commit worktree changes and push helper/* branch to origin. */
+  async publish(): Promise<void> {
+    if (!isHelperSession(this.sessionId)) {
+      this.emit({ type: 'error', message: 'Commit & push is only for Helper sessions.' });
+      return;
+    }
+    const sid = this.sessionId;
+    try {
+      const result = await publishHelperWorktree(sid);
+      if (result.ok) {
+        this.emit({ type: 'text', text: result.message, sessionId: sid });
+      } else {
+        this.emit({ type: 'error', message: result.message, sessionId: sid });
+      }
+    } catch (err) {
+      this.emit({
+        type: 'error',
+        message: err instanceof Error ? err.message : String(err),
+        sessionId: sid,
+      });
+    }
   }
 }
 

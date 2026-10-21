@@ -35,6 +35,7 @@ export function AgentPanel({
   onUndoAll,
   onOpenDiff,
   onOpenSessionFile,
+  onPublish,
 }: {
   cwd: string;
   error?: string;
@@ -56,6 +57,8 @@ export function AgentPanel({
   onUndoAll: () => void;
   onOpenDiff: (change: AgentChange) => void;
   onOpenSessionFile?: (path: string) => void;
+  /** Helper only: commit worktree + push to origin. */
+  onPublish?: () => void;
 }) {
   const logRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -71,6 +74,7 @@ export function AgentPanel({
   const [sessionMenu, setSessionMenu] = useState<{ x: number; y: number; id: string } | null>(null);
   const [openTools, setOpenTools] = useState<Set<number>>(new Set());
   const [showJump, setShowJump] = useState(false);
+  const [publishing, setPublishing] = useState(false);
   const busy = state === 'running';
   const helperActive = isHelperSessionId(sessionId);
   const activeId = sessionId ?? '';
@@ -319,7 +323,7 @@ export function AgentPanel({
           {messages.length === 0 && !error && (
             <div className="agent-empty">
               {helperActive
-                ? 'Helper edits RemotePad. Chat is scratch; lasting work is git + AGENTS.md. Refresh wipes this chat. + starts a general Agent in the selected repo.'
+                ? `Helper edits a git worktree (not the live install). Cwd: ${cwd || '…'}. Commit & push publishes the helper/* branch. Refresh wipes this chat.`
                 : 'General Agent — cwd follows the selected repo (or the file-tree root). + starts another one. Helper stays in its own tab.'}
             </div>
           )}
@@ -486,11 +490,23 @@ export function AgentPanel({
               setChips((prev) => ({ ...prev, [activeId]: [] }));
               onClear();
             }}
-            disabled={busy}
+            disabled={busy || publishing}
             title={helperActive
-              ? 'Wipe Helper chat. Lasting work is already in git and AGENTS.md.'
+              ? 'Wipe Helper chat. Lasting work is already in the worktree / git.'
               : "Wipe this Agent session's saved history"}
           >{helperActive ? 'Refresh' : 'Clear'}</button>
+          {helperActive && onPublish && (
+            <button
+              className="ghost"
+              disabled={busy || publishing}
+              title="Commit all worktree changes and push this helper/* branch to origin"
+              onClick={() => {
+                setPublishing(true);
+                onPublish();
+                window.setTimeout(() => setPublishing(false), 2500);
+              }}
+            >{publishing ? 'Pushing…' : 'Commit & push'}</button>
+          )}
           <span className="spacer" />
           {busy
             ? <button className="danger" onClick={onStop}>Stop</button>

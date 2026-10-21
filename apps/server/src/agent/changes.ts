@@ -184,6 +184,11 @@ export class ChangeTracker {
     return paths;
   }
 
+  /** Forgets entries owned by another session so they never show up here. */
+  drop(paths: string[]): void {
+    for (const filePath of paths) this.entries.delete(path.resolve(filePath));
+  }
+
   private dropIgnored(): void {
     for (const abs of this.entries.keys()) {
       if (isRuntimePath(abs)) this.entries.delete(abs);

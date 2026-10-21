@@ -1,6 +1,6 @@
 # RemotePad Helper brief
 
-You are the **Helper** session for RemotePad. You only edit this repo. Do not follow the file-tree or Repos selection in the UI — your cwd is always the RemotePad install root.
+You are the **Helper** session for RemotePad. You only edit the **Helper git worktree** (`~/.remotepad/helper-worktrees/<id>`), not the live install the user is running. Do not follow the file-tree or Repos selection in the UI for cwd.
 
 ## Mission
 
@@ -24,6 +24,7 @@ Change RemotePad (layout, Agent panel, workspaces, viewers, terminal) when the u
 | editor / Monaco / code | editor **body** | `EditorArea.tsx` Monaco |
 | address bar | path field in the top chrome | `App.tsx` `goToAddress` |
 | Agent / Helper | right dock chat | `AgentPanel.tsx` |
+| Helper worktree / publish | `~/.remotepad/helper-worktrees/` + Commit & push | `helper-worktree.ts`, `host.ts` `publish` |
 | pad window | tree + editor only | `App.tsx` `?pad=` |
 
 ## Layout
@@ -120,7 +121,8 @@ If a job is about click / double-click / reveal / scroll, read this table first.
 | Agent history (`☰`) | toggle | docked right column that squeezes the chat (like the Files column); each row shows only a delete icon; JSONL / Rename live in the row's right-click menu (Rename hint `Dbl-click`) |
 | Agent compose | — | pinned at bottom (never clipped); input stays enabled while running |
 | Agent transcript | — | You / Agent roles; tool rows start folded (▸) and show the first line of the saved print — expand for the full output RemotePad kept (XiaoBa's session file may only have a stub); a jump-to-bottom ↓ button appears once you scroll up more than one viewport from the bottom |
-| Helper | Refresh | wipe this Helper chat in place (git + this file keep the work); does not spawn a new helper |
+| Helper | Refresh | wipe this Helper chat in place (worktree + AGENTS.md keep the work); does not spawn a new helper |
+| Helper | Commit & push | stage + commit worktree + push `helper/*` to origin (one key) |
 | Agent `+` | click | new general `rp-*` session (cwd follows the selected repo) |
 
 ## Agent sessions
@@ -128,7 +130,10 @@ If a job is about click / double-click / reveal / scroll, read this table first.
 - Runtime: local XiaoBa **catscompany** surface (`createAdapterRuntime` + mutable-identity prompts). Not the CatsCo web connector (no login/users/WS bot). LLM from Host **Agent model** / `~/.remotepad/llm.json`.
 - Turn end: like CatsCo, always surface XiaoBa `result.text` when `visibleToUser` — including cancel (`已停止…`), fail, and empty-`max_tokens` notices after a partial stream. Track spoken text across tool flushes so a final notice is not dropped when earlier assistant text already streamed. Wire `onThinking` (compaction start/done) into the panel. Do not go idle silently.
 - Normal sessions: id `rp-*` (or legacy `remotepad`); cwd follows active repo or tree root.
-- Helper sessions: id `helper` (legacy) or `helper-*`; cwd is always `repoRoot`. **Refresh** wipes the current Helper chat. Close / delete like any other session. Clicking a Repos row updates `rp-*` cwd only — it does not reload Helper (or any open) chat.
+- Helper sessions: id `helper` (legacy) or `helper-*`. **cwd is a git worktree**, not the live install: `~/.remotepad/helper-worktrees/<id>` on branch `helper/<id>` (`apps/server/src/agent/helper-worktree.ts`). Live `repoRoot` stays what the user is running. **Refresh** wipes the Helper chat. Delete session also removes that worktree. Clicking a Repos row updates `rp-*` cwd only — it does not reload Helper.
+- **Commit & push** (Helper compose row): one-key `git add -A` + commit + `git push -u origin HEAD` for the helper branch. Never force-push; refuses `main`/`master`. Result lands as an Agent text/error line in the panel.
+- **Preview:** worktree `settings.json` uses offset ports (`3900+` / `5300+`). To try Helper’s build without touching live: in the worktree `pnpm install` (once) then `pnpm dev`. Promote by merging the pushed `helper/*` branch when you like it.
+- **Self-edit / `tsx watch`:** because Helper no longer writes the live tree, editing under the worktree does not restart the live Agent host. (If someone still points Helper at live, `pnpm dev:stable` avoids watch kills.)
 - Switching Agent tabs abandons an in-flight run (`runGen` + session lock in `host.ts`); the new tab must not stay stuck on Working / “already running”.
 - ChangeTracker is per session (`trackers` map + `get tracker()`); never call `.list()` on a missing tracker.
 - **Stop** must abandon the same way (`runGen++`, `sending=false`, idle, then `requestInterrupt`) and surface `已停止当前请求。` — interrupt alone waits on the provider abort and leaves Working stuck.
@@ -137,7 +142,7 @@ If a job is about click / double-click / reveal / scroll, read this table first.
 
 ## Git
 
-This install is a working copy. Prefer a local Helper branch and small commits when the user asks to persist. Never push `main`. Never force-push. The merge unit back to upstream is this file plus the matching product diffs.
+Helper work happens on `helper/<sessionId>` in a worktree. Use the panel **Commit & push** to publish that branch. Never push `main`. Never force-push. The user merges into live when ready.
 
 ## Grep / edit hygiene
 

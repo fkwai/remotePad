@@ -86,6 +86,8 @@ export function App() {
   repoPathRef.current = repoPath;
   const agentSessionIdRef = useRef(agentSessionId);
   agentSessionIdRef.current = agentSessionId;
+  const agentStateRef = useRef(agentState);
+  agentStateRef.current = agentState;
   const expandedRef = useRef(expanded);
   expandedRef.current = expanded;
   const sideTabRef = useRef(sideTab);
@@ -388,6 +390,14 @@ export function App() {
       };
       ws.onclose = () => {
         if (closed) return;
+        if (agentStateRef.current === 'running') {
+          setAgentState('idle');
+          setAgentMessages((prev) => [...prev, {
+            id: agentMsgId.current++,
+            role: 'status',
+            text: 'Agent connection dropped (server restart?). This turn was interrupted — send again if needed.',
+          }]);
+        }
         retry = window.setTimeout(connect, 800);
       };
     };
@@ -1381,6 +1391,7 @@ export function App() {
               onOpenSessionFile={(path) => {
                 void openFile({ name: basename(path), path, kind: 'file' });
               }}
+              onPublish={() => sendAgent({ type: 'publish' })}
             />
           </Panel>
           )}

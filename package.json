@@ -5,6 +5,7 @@
   "description": "RemotePad — a lightweight control surface for remote development.",
   "scripts": {
     "dev": "pnpm --parallel --filter @remotepad/server --filter @remotepad/web dev",
+    "dev:stable": "pnpm --parallel --filter @remotepad/server start --filter @remotepad/web dev",
     "build": "pnpm --filter @remotepad/shared build && pnpm --filter @remotepad/web build && pnpm --filter @remotepad/server build",
     "start": "pnpm --filter @remotepad/server start"
   },
