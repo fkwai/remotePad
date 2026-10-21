@@ -320,7 +320,7 @@ export function EditorArea({
               />
             )
             : tab.viewMode === 'rendered' && hasRenderedView(tab.kind)
-            ? <Rendered tab={tab} onInfo={setViewInfo} />
+            ? <Rendered tab={tab} onInfo={setViewInfo} onChange={onChange} />
             : tab.kind === 'diff'
               ? <DiffView diff={tab.diff || ''} path={tab.path} />
               : tab.binary
@@ -402,7 +402,9 @@ export function EditorArea({
             title={tab.viewMode === 'source' ? 'Show rendered (Ctrl/⌘+L)' : 'Show source (Ctrl/⌘+L)'}
             onClick={() => onToggleView(tab.path, tab.viewMode === 'source' ? 'rendered' : 'source')}
           >{'</>'}</button>
-          <span className="status-info">{viewInfo || ''}</span>
+          <span className="status-info">{viewInfo || (tab.kind === 'markdown'
+            ? (tab.viewMode === 'source' ? 'Raw markdown' : 'Click a block to edit · Esc cancels · Ctrl/⌘+Enter done')
+            : '')}</span>
         </div>
       )}
         </div>
@@ -426,8 +428,24 @@ export function EditorArea({
   );
 }
 
-function Rendered({ tab, onInfo }: { tab: OpenTab; onInfo?: (text: string | null) => void }) {
-  if (tab.kind === 'markdown') return <MarkdownView content={tab.content} path={tab.path} />;
+function Rendered({
+  tab,
+  onInfo,
+  onChange,
+}: {
+  tab: OpenTab;
+  onInfo?: (text: string | null) => void;
+  onChange?: (path: string, content: string) => void;
+}) {
+  if (tab.kind === 'markdown') {
+    return (
+      <MarkdownView
+        content={tab.content}
+        path={tab.path}
+        onChange={onChange ? (content) => onChange(tab.path, content) : undefined}
+      />
+    );
+  }
   if (tab.kind === 'json') {
     const parsed = parseJsonSafe(tab.content);
     return parsed.ok ? <JsonView value={parsed.value} /> : <div className="empty">{parsed.error}</div>;

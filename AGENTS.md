@@ -47,6 +47,7 @@ UI regions (product names): **Sidebar** (left), **Editor** (middle top), **Termi
 | Sidebar / tree / Favorites / Repos | `apps/web/src/components/LeftSidebar.tsx`, `FileTree.tsx` |
 | Editor tabs / viewers | `apps/web/src/components/EditorArea.tsx` |
 | HTML / plot preview | `apps/web/src/components/viewers/HtmlView.tsx` |
+| Markdown render + in-place edit | `apps/web/src/components/viewers/MarkdownView.tsx` (`splitChunks` keeps per-block source; `md-block` / `md-edit-area` in `styles.css`) |
 | Folder explorer | `apps/web/src/components/FolderView.tsx` |
 | Drag/drop MIME | `apps/web/src/dnd.ts` |
 | Open-file popup API | `apps/server/src/routes/ui.ts`, `ui-bus.ts` (`POST /api/ui/open`) |
@@ -95,6 +96,9 @@ If a job is about click / double-click / reveal / scroll, read this table first.
 | Editor **tab** | Files toggle | Right side of tab strip; opens a right column. Editor + scrollbar shrink together; closed = both flush to the pane edge |
 | Editor **body** | scrollbar | Flush with the editor’s right edge (no overview-ruler gutter); moves with the editor when Files is open |
 | Rendered view (md) | width | Fills the full editor width — no `max-width` cap on `.md-body` |
+| Rendered view (md) | click a block | Typora-style in-place edit: the block becomes a raw-markdown field in the same place (`MarkdownView.tsx` `splitChunks`); typing writes through `onChange` so `●` and `Ctrl/⌘+S` work; blur or `Ctrl/⌘+Enter` renders it again, `Esc` discards |
+| Rendered view (md) | drag-select | Selecting text never opens the block editor (copy still works); clicking a link follows it |
+| Rendered view (md) | untouched blocks | Keep their exact source bytes — editing one block never reformats the rest of the file; `Ctrl/⌘+L` still gives raw source |
 | Rendered view (jsonl) | open / reload | Scrolls to the last record automatically (`JsonlView.tsx` `useLayoutEffect` on `.viewer`); Agent "Open session JSONL" included |
 | Editor **tab** | drag | to Terminal / Agent: insert path; to address bar or a new browser tab: open a tree + editor window (`?pad=`) |
 | Editor **tab** | close × | Far right, small hit; a 14px gap after the name; hover tints only the ×, not the file name |

@@ -868,6 +868,37 @@ button.tree-node:hover { border-color: transparent; }
   padding: 16px 20px 40px;
 }
 .md-body { line-height: 1.6; color: var(--text); }
+
+/* Rendered markdown is editable in place: click a block to see its markdown. */
+.md-block {
+  cursor: text;
+  border-radius: 6px;
+  margin-left: -6px;
+  margin-right: -6px;
+  padding: 0 6px;
+}
+.md-block:hover { background: rgba(255, 255, 255, 0.028); }
+.md-block:empty { min-height: 1.6em; }
+.md-block:empty::before { content: 'Click to write…'; color: var(--muted); opacity: 0.65; }
+.md-edit { margin: 1px 0; }
+.md-edit-area {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  margin: 0;
+  padding: 6px 10px;
+  background: var(--bg-soft, #0f1218);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-left: 2px solid var(--accent);
+  border-radius: 6px;
+  font-family: var(--mono);
+  font-size: 12.5px;
+  line-height: 1.55;
+  resize: none;
+  overflow: hidden;
+  outline: none;
+}
 .md-body a, .md-body a:visited {
   color: var(--md-link);
   text-decoration: underline;
