@@ -99,6 +99,7 @@ If a job is about click / double-click / reveal / scroll, read this table first.
 | Rendered view (md) | click a block | Typora-style in-place edit: the block becomes a raw-markdown field in the same place (`MarkdownView.tsx` `splitChunks`); typing writes through `onChange` so `●` and `Ctrl/⌘+S` work; blur or `Ctrl/⌘+Enter` renders it again, `Esc` discards |
 | Rendered view (md) | drag-select | Selecting text never opens the block editor (copy still works); clicking a link follows it |
 | Rendered view (md) | untouched blocks | Keep their exact source bytes — editing one block never reformats the rest of the file; `Ctrl/⌘+L` still gives raw source |
+| Rendered view (md) | block split | Breaks at blank lines; a fence or display-math block stays whole only when its closer exists (bounded lookahead), so a stray marker can never merge the rest of the file into one block |
 | Rendered view (jsonl) | open / reload | Scrolls to the last record automatically (`JsonlView.tsx` `useLayoutEffect` on `.viewer`); Agent "Open session JSONL" included |
 | Editor **tab** | drag | to Terminal / Agent: insert path; to address bar or a new browser tab: open a tree + editor window (`?pad=`) |
 | Editor **tab** | close × | Far right, small hit; a 14px gap after the name; hover tints only the ×, not the file name |

@@ -12,10 +12,9 @@ import 'katex/dist/katex.min.css';
  *
  * The document is split into top-level blocks. Every untouched block keeps its
  * exact source text, so rendering + editing never reformats the rest of the
- * file. Clicking a block swaps that block for a raw-markdown editor in the same
- * place (content is written through onChange as you type); leaving the block
- * renders it again. Source mode (`Ctrl/⌘+L`) stays available for markdown that
- * needs full syntax help.
+ * file. Clicking a block swaps it for a raw-markdown editor in the same place
+ * (content is written through onChange as you type); leaving the block renders
+ * it again. Source mode (Ctrl/Cmd+L) stays available for full syntax help.
  */
 
 interface Chunk {
@@ -38,6 +37,11 @@ interface EditState {
   base: Doc;
 }
 
+/** display-math delimiter, built at runtime so it never gets rewritten */
+const MATH = '$' + '$';
+const FENCE_LOOKAHEAD = 2000;
+const MATH_LOOKAHEAD = 300;
+
 export function MarkdownView({
   content,
   path,
@@ -56,10 +60,13 @@ export function MarkdownView({
   const taRef = useRef<HTMLTextAreaElement | null>(null);
   const caretRef = useRef(0);
 
-  const write = useCallback((base: Doc, index: number, body: string) => {
-    if (!onChange) return;
-    onChange(base.lead + base.chunks.map((c, i) => (i === index ? body : c.body) + c.trail).join(''));
-  }, [onChange]);
+  const write = useCallback(
+    (base: Doc, index: number, body: string) => {
+      if (!onChange) return;
+      onChange(base.lead + base.chunks.map((c, i) => (i === index ? body : c.body) + c.trail).join(''));
+    },
+    [onChange],
+  );
 
   const startEdit = useCallback((index: number, clientY: number, rect: DOMRect) => {
     const base = docRef.current;
@@ -89,7 +96,7 @@ export function MarkdownView({
 
   return (
     <div className="viewer md-body">
-      {view.chunks.map((chunk, i) => (
+      {view.chunks.map((chunk, i) =>
         edit && edit.index === i ? (
           <div className="md-edit" key={`e${i}`}>
             <textarea
@@ -122,15 +129,9 @@ export function MarkdownView({
             />
           </div>
         ) : (
-          <RenderedBlock
-            key={`b${i}`}
-            body={chunk.body}
-            path={path}
-            index={i}
-            onEnter={startEdit}
-          />
-        )
-      ))}
+          <RenderedBlock key={`b${i}`} body={chunk.body} path={path} index={i} onEnter={startEdit} />
+        ),
+      )}
     </div>
   );
 }
@@ -161,11 +162,16 @@ const RenderedBlock = memo(function RenderedBlock({
     >
       <ReactMarkdown
         remarkPlugins={[remarkGfm, remarkMath]}
-        rehypePlugins={[[rehypeKatex, {
-          throwOnError: false,
-          strict: false,
-          macros: KATEX_MACROS,
-        }]]}
+        rehypePlugins={[
+          [
+            rehypeKatex,
+            {
+              throwOnError: false,
+              strict: false,
+              macros: KATEX_MACROS,
+            },
+          ],
+        ]}
         urlTransform={(href) => resolveMdUrl(href, path)}
       >
         {prepared}
@@ -174,7 +180,15 @@ const RenderedBlock = memo(function RenderedBlock({
   );
 });
 
-/** Split a document into top-level blocks, keeping every byte of the source. */
+/**
+ * Split a document into top-level blocks, keeping every byte of the source.
+ *
+ * Blocks break at blank lines. A fenced code block or a display-math block is
+ * kept whole (blank lines inside it included), but only when its closing marker
+ * really exists — the search is a bounded lookahead, so a stray or unclosed
+ * marker can never swallow the rest of the file into one giant editable block.
+ * Inline math never opens a block.
+ */
 function splitChunks(src: string): Doc {
   if (!src) return { lead: '', chunks: [] };
   const lines = src.split('\n');
@@ -182,44 +196,41 @@ function splitChunks(src: string): Doc {
   let lead = '';
   let cur: string[] = [];
   let gap: string[] = [];
-  let fence: string | null = null;
-  let math = false;
 
   const close = (last: boolean) => {
     if (!cur.length) return;
     const body = cur.join('\n');
-    const trail = gap.length ? `\n${gap.join('\n')}${last ? '' : '\n'}` : (last ? '' : '\n');
+    const trail = gap.length ? `\n${gap.join('\n')}${last ? '' : '\n'}` : last ? '' : '\n';
     chunks.push({ body, trail });
     cur = [];
     gap = [];
   };
 
-  for (const line of lines) {
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
     const trimmed = line.trim();
-    const fenceMark = /^\s*(`{3,}|~{3,})/.exec(line);
 
-    if (fence) {
-      cur.push(line);
-      if (fenceMark && trimmed.startsWith(fence)) fence = null;
-      continue;
+    const fenceOpen = /^\s*(`{3,}|~{3,})/.exec(line);
+    if (fenceOpen) {
+      const closer = findFenceCloser(lines, i + 1, fenceOpen[1][0]);
+      if (closer > -1) {
+        if (gap.length) close(false);
+        for (let j = i; j <= closer; j++) cur.push(lines[j]);
+        i = closer;
+        continue;
+      }
     }
-    if (fenceMark) {
-      if (gap.length) close(false);
-      fence = fenceMark[1].slice(0, 3);
-      cur.push(line);
-      continue;
+
+    if (trimmed.startsWith(MATH) && !(trimmed.length > 2 && trimmed.endsWith(MATH))) {
+      const closer = findMathCloser(lines, i + 1);
+      if (closer > -1) {
+        if (gap.length) close(false);
+        for (let j = i; j <= closer; j++) cur.push(lines[j]);
+        i = closer;
+        continue;
+      }
     }
-    if (math) {
-      cur.push(line);
-      if (trimmed.endsWith('$')) math = false;
-      continue;
-    }
-    if (trimmed.startsWith('$')) {
-      if (gap.length) close(false);
-      cur.push(line);
-      if (!(trimmed.length > 2 && trimmed.endsWith('$'))) math = true;
-      continue;
-    }
+
     if (trimmed === '') {
       if (cur.length) gap.push(line);
       else if (!chunks.length) lead += `${line}\n`;
@@ -233,13 +244,28 @@ function splitChunks(src: string): Doc {
   return { lead, chunks };
 }
 
+function findFenceCloser(lines: string[], from: number, ch: string): number {
+  const end = Math.min(lines.length, from + FENCE_LOOKAHEAD);
+  for (let j = from; j < end; j++) {
+    const t = lines[j].trim();
+    if (t.length >= 3 && t === ch.repeat(t.length)) return j;
+  }
+  return -1;
+}
+
+function findMathCloser(lines: string[], from: number): number {
+  const end = Math.min(lines.length, from + MATH_LOOKAHEAD);
+  for (let j = from; j < end; j++) {
+    if (lines[j].trim().endsWith(MATH)) return j;
+  }
+  return -1;
+}
+
 function resolveMdUrl(href: string, filePath: string): string {
   if (!href) return href;
   if (/^(https?:|data:|mailto:|blob:|#)/i.test(href)) return href;
   if (href.startsWith('/api/')) return href;
-  const abs = href.startsWith('/')
-    ? href
-    : joinPath(dirname(filePath), href);
+  const abs = href.startsWith('/') ? href : joinPath(dirname(filePath), href);
   return `/api/fs/raw?path=${encodeURIComponent(abs)}`;
 }
 
