@@ -133,7 +133,7 @@ Check status: `systemctl --user status remotepad.service`
 
 The unit runs production mode (`pnpm start`, port 3847). For dev mode with hot reload, use `./scripts/remotepad.sh up` manually instead.
 
-### Helper scripts
+### Scripts
 
 ```bash
 chmod +x scripts/remotepad.sh scripts/remotepad-tunnel.sh
@@ -252,22 +252,18 @@ The Repos list shows a compact HEAD line for each repo (`branch ↑n ↓n *dirty
 
 ## Agent
 
-The right dock defaults to **Agent**. It embeds XiaoBa from `REMOTEPAD_XIAOBA_PATH` on the same **catscompany** runtime surface CatsCo uses (`createAdapterRuntime` + local p2p turn scope), without the CatsCo web connector, accounts, or multi-user chat. Session data for this panel is isolated under `~/.remotepad/xiaoba`.
+The right dock is a chat client. **XiaoBa is not part of this repo.** RemotePad loads whatever XiaoBa-CLI you point at (`REMOTEPAD_XIAOBA_PATH`, default `../XiaoBa-CLI`) and talks to its `catscompany` runtime in-process. CatsCo keeps that runtime up to date; RemotePad does not fork it, host it, or ship a second copy.
 
-Each Agent conversation follows the CatsCo split. The panel transcript (right-click → **Open session JSONL**) is what was delivered to the chat, at `~/.remotepad/history/{id}.jsonl`. XiaoBa's model context is a separate file it rewrites itself, `~/.remotepad/xiaoba/data/sessions/{id}.jsonl`, with runtime state in `~/.remotepad/xiaoba/data/session-state/{id}.json`. The active session id and custom titles are in `~/.remotepad/agent-active.json`. Reloading the page restores the model context from XiaoBa and the chat panel from the delivered transcript.
+There is no Helper agent, no worktree that edits RemotePad, and no preview port that merges back into this install. An Agent session works in the repo you selected (or the file-tree root). It does not maintain RemotePad.
 
-The Agent panel is a full-height right dock. Open sessions appear as **tabs** along the top. **+** starts a new session without deleting the others. **☰** opens history to switch, rename, or delete any session. Closing a tab hides it from the strip; the JSONL stays on disk until you Delete. Changed files show as a compact list at the bottom of the panel (`M path +n −n`) with Keep/Undo; click a row for the full diff. Host / git / terminals / viewer modules open from the computer name in the top-right. Each file-type preview (image, markdown, HTML, JSON, CSV, log) is an optional module; turn it off there (or in `~/.remotepad/modules.json`) and those files open as code.
+The panel is a full-height right dock. **+** starts a session (`rp-*`). **☰** opens history. Right-click a tab for **Open session JSONL**, rename, or close. The delivered chat is `~/.remotepad/history/{id}.jsonl`. XiaoBa's own model context (which it rewrites, and may stub old tool output) is `~/.remotepad/xiaoba/data/sessions/{id}.jsonl`. Titles live in `~/.remotepad/agent-active.json`. Click the computer name for host, git, terminals, viewer modules, and **Agent model** (key, model, API base, max output tokens in `~/.remotepad/llm.json`).
 
-**Helper** sessions (`helper` or `helper-*`) edit this install. Working directory is always `repoRoot`, independent of the Sidebar tree or Repos selection. Each Helper loads `AGENTS.md` into the system prompt. Chat JSONL is scratch; lasting layout and gesture rules belong in `AGENTS.md`. **Refresh** wipes the current Helper chat — the work is already in git and `AGENTS.md`. **+** starts a **general Agent** (`rp-*`) whose cwd follows the selected repo. Close or delete a session like any other. XiaoBa may summarize older turns; the host appends the latest user message verbatim so that remains the job.
+File edits from the agent can be kept or undone in the panel. Shell side effects are not undone.
 
 Requirements:
 
-- XiaoBa-CLI installed next to RemotePad (or `REMOTEPAD_XIAOBA_PATH`)
-- `npm run build` in XiaoBa-CLI, or a `src/` tree that `tsx` can load
-- LLM config: click the computer name → **Agent model** (key, model, API base, max output tokens; saved in `~/.remotepad/llm.json`, default max tokens `32768`), or `xiaoba config` / `GAUZ_LLM_*` in XiaoBa-CLI `.env` when that file is absent
-- Not a CatsCo login client — single-user local Agent only
-
-Normal agent sessions work in the active repo, or the file-tree root if none is selected. File edits are snapshotted so you can **Accept** or **Undo** them in the panel or in a diff tab. Shell side effects are not undone.
+- A XiaoBa-CLI checkout next to RemotePad (or `REMOTEPAD_XIAOBA_PATH`), built (`npm run build`) or loadable from `src/` via `tsx`
+- LLM: Host pop → **Agent model**, or `GAUZ_LLM_*` in that XiaoBa-CLI `.env` when `~/.remotepad/llm.json` has no key
 
 ## Repo layout
 

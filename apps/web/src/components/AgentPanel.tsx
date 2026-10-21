@@ -332,7 +332,7 @@ export function AgentPanel({
             <div className="agent-empty">
               {helperActive
                 ? `Helper edits one reusable git worktree (not the live install). Cwd: ${cwd || '…'}. Preview 2027 runs that tree as a second window, Commit & push publishes the branch, Merge → main lands it and deletes the tree. Refresh wipes this chat.`
-                : 'General Agent — cwd follows the selected repo (or the file-tree root). + starts another one. Helper stays in its own tab.'}
+                : 'Agent — cwd follows the selected repo (or the file-tree root). + starts another session.'}
             </div>
           )}
         {turns.map((turn) => (

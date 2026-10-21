@@ -859,8 +859,11 @@ export class AgentHost {
             flushAssistant();
             if (!mine()) return;
             this.emit({ type: 'tool_start', name, id, input });
+            // Snapshot here: catscompany skips confirmToolExecution, so the
+            // confirm hook never runs. onToolStart fires before the write.
             if (fileTools.has(name)) {
               lastWrite = toolPath(input as Record<string, unknown>, cwd);
+              if (lastWrite) await this.tracker.snapshotBeforeWrite(lastWrite);
             }
           },
           onToolEnd: async (name: string, id: string, result: string) => {

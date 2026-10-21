@@ -981,34 +981,70 @@ export function App() {
   };
 
   const openAgentDiff = (change: AgentChange) => {
-    const id = `agent:${change.path}`;
-    const tab: OpenTab = {
-      path: id,
-      name: `${basename(change.path)} (${change.kind})`,
-      content: change.diff,
-      savedContent: change.diff,
-      binary: false,
-      viewMode: 'source',
-      dirty: false,
-      loading: false,
-      kind: 'diff',
-      diff: change.diff,
-      agentPath: change.path,
-    };
-    setTabs((prev) => [tab, ...prev.filter((item) => item.path !== id)]);
-    setActivePath(id);
+    const filePath = change.path;
+    const synth = `agent:${filePath}`;
+    const kind = viewerKind(filePath, moduleEnabledRef.current);
+    setTabs((prev) => {
+      const rest = prev.filter((item) => item.path !== synth);
+      const existing = rest.find((item) => item.path === filePath);
+      if (existing) {
+        return rest.map((item) => item.path === filePath
+          ? {
+            ...item,
+            temp: false,
+            viewMode: 'source' as const,
+            diff: change.diff,
+            before: change.before,
+            after: change.after,
+            agentPath: filePath,
+          }
+          : item);
+      }
+      const tab: OpenTab = {
+        path: filePath,
+        name: basename(filePath),
+        content: change.after ?? '',
+        savedContent: change.after ?? '',
+        binary: false,
+        viewMode: 'source',
+        dirty: false,
+        loading: false,
+        kind,
+        diff: change.diff,
+        before: change.before,
+        after: change.after,
+        agentPath: filePath,
+      };
+      return [tab, ...rest];
+    });
+    setActivePath(filePath);
   };
 
   const applyAgentChanges = (files: AgentChange[], touched?: string[]) => {
     setAgentChanges(files);
     const pending = new Set(files.map((item) => item.path));
     setTabs((prev) => prev
-      .filter((tab) => !tab.agentPath || pending.has(tab.agentPath))
+      // Drop leftover synthetic agent: tabs from the old flow.
+      .filter((tab) => !(tab.path.startsWith('agent:') && tab.agentPath && !pending.has(tab.agentPath)))
       .map((tab) => {
         if (!tab.agentPath) return tab;
         const change = files.find((item) => item.path === tab.agentPath);
-        if (!change) return tab;
-        return { ...tab, diff: change.diff, content: change.diff, savedContent: change.diff };
+        if (!change) {
+          // Review done (Keep/Undo): stay on the real file, clear red/green.
+          return {
+            ...tab,
+            agentPath: undefined,
+            before: undefined,
+            after: undefined,
+            diff: undefined,
+          };
+        }
+        return {
+          ...tab,
+          diff: change.diff,
+          before: change.before,
+          after: change.after,
+        };
       }));
     if (touched?.length) void reloadTouched(touched);
   };

@@ -1,15 +1,16 @@
-# RemotePad Helper brief
+# RemotePad product map
 
-You are the **Helper** session for RemotePad. You only edit the **Helper git worktree** (`~/.remotepad/helper-worktrees/work`), not the live install the user is running. Do not follow the file-tree or Repos selection in the UI for cwd.
+RemotePad is the browser UI (files, editor, terminal, agent chat). It does not own the agent runtime. XiaoBa-CLI is a separate tree (`REMOTEPAD_XIAOBA_PATH`, default sibling `../XiaoBa-CLI`). CatsCo maintains that runtime. This repo only embeds it.
+
+There is no Helper agent in the current product. Do not add a worktree, a second port, or a merge-back-into-this-install flow. Agent sessions (`rp-*`) edit the selected repo, not RemotePad. Code under `helper-worktree.ts` and the Helper buttons are leftover; do not extend them.
 
 ## Mission
 
-Change RemotePad (layout, Agent panel, workspaces, viewers, terminal) when the user asks in chat. Prefer small, targeted edits. After work: say what changed and how to verify. Asking the user a question is not “done”.
+Change RemotePad (layout, Agent panel, workspaces, viewers, terminal) when the user asks in chat. Prefer small, targeted edits. After work: say what changed and how to verify.
 
 ## Memory
 
-- This file is the durable product map. Chat JSONL is scratch. Helper **Refresh** wipes the chat; lasting work is already in git and this file.
-- After any UI, layout, or **gesture** change, add or fix a line in this file before you say done.
+- This file is the durable product map. After any UI, layout, or **gesture** change, add or fix a line here before you say done.
 - Checkpoint summaries compress older work; keep using them. The latest user message is the job — if a summary retargets the widget, follow the user and this file.
 - After a context checkpoint: re-read this file and the files you will edit.
 - Do not invent a skill or extra prompt dump as the map. Grep / glob the tree; this file names the files.
@@ -23,8 +24,7 @@ Change RemotePad (layout, Agent panel, workspaces, viewers, terminal) when the u
 | editor **tab** | chrome in `.tabs` (the label, not the code) | `EditorArea.tsx` tab strip |
 | editor / Monaco / code | editor **body** | `EditorArea.tsx` Monaco |
 | address bar | path field in the top chrome | `App.tsx` `goToAddress` |
-| Agent / Helper | right dock chat | `AgentPanel.tsx` |
-| Helper worktree / preview / merge | one tree `~/.remotepad/helper-worktrees/work` + Preview 2027 + Merge → main | `helper-worktree.ts`, `host.ts` `preview`/`merge` |
+| Agent | right dock chat | `AgentPanel.tsx` |
 | pad window | tree + editor only | `App.tsx` `?pad=` |
 
 ## Layout
@@ -52,7 +52,7 @@ UI regions (product names): **Sidebar** (left), **Editor** (middle top), **Termi
 | Drag/drop MIME | `apps/web/src/dnd.ts` |
 | Open-file popup API | `apps/server/src/routes/ui.ts`, `ui-bus.ts` (`POST /api/ui/open`) |
 | Agent tabs / chat | `apps/web/src/components/AgentPanel.tsx`, `RightDock.tsx` |
-| Agent host (XiaoBa embed) | `apps/server/src/agent/host.ts`, `ws.ts` — local **catscompany** surface via `createAdapterRuntime` (CatsCo-shaped runtime, no CatsCo cloud/users/WS bot) |
+| Agent host (XiaoBa embed) | `apps/server/src/agent/host.ts`, `ws.ts` — loads XiaoBa-CLI `createAdapterRuntime` (`surface: catscompany`). Not a CatsCo login, and not a runtime this repo maintains. |
 | Workspaces / Repos store | `~/.remotepad/workspaces.json` (server routes under `apps/server`) |
 | Favorites | `~/.remotepad/favorites.json` |
 | Host / ports | `settings.json` at install root (`host`, `port`, `uiPort`; env overrides) |
@@ -66,7 +66,7 @@ UI regions (product names): **Sidebar** (left), **Editor** (middle top), **Termi
 | Plugin loader | `apps/server/src/plugins.ts` |
 | Drag path MIME | `apps/web/src/dnd.ts` — drop on address bar (or the browser URL bar) opens a `?pad=` window with tree + editor that auto-opens the dragged file/dir; `text/plain` and `text/uri-list` both carry the `?pad=` URL so browser address-bar drops navigate to the file, not an empty editor; drop on Agent compose adds a filename chip |
 
-Product docs: `README.md`. This file (`AGENTS.md`) is the helper map — if it disagrees with the tree, update this file.
+Product docs: `README.md`. This file is the map — if it disagrees with the tree, update this file.
 
 ## Gestures
 
@@ -126,31 +126,22 @@ If a job is about click / double-click / reveal / scroll, read this table first.
 | Agent history (`☰`) | toggle | docked right column that squeezes the chat (like the Files column); each row shows only a delete icon; JSONL / Rename live in the row's right-click menu (Rename hint `Dbl-click`) |
 | Agent compose | — | pinned at bottom (never clipped); input stays enabled while running |
 | Agent transcript | — | You / Agent roles; tool rows start folded (▸) and show the first line of the saved print — expand for the full output RemotePad kept (XiaoBa's session file may only have a stub); a jump-to-bottom ↓ button appears once you scroll up more than one viewport from the bottom |
-| Helper | Refresh | wipe this Helper chat in place (worktree + AGENTS.md keep the work); does not spawn a new helper |
-| Helper | Commit & push | stage + commit worktree + push `helper/*` to origin (one key) |
-| Helper | Preview 2027 | boot the worktree as a second instance (UI 2027, API 2028) seeded with this window's tabs |
-| Helper | Merge → main | commit+push, merge into live `main`, delete the merged worktree, stop the 2027 preview |
-| Agent `+` | click | new general `rp-*` session (cwd follows the selected repo) |
+| Agent changes list | click a row | opens the **real file** tab (same name/path) in inline red/green review (`before`/`after`); Keep / Undo on the toolbar — no separate `(modify)` tab |
+| Agent `+` | click | new `rp-*` session (cwd follows the selected repo) |
 
 ## Agent sessions
 
-- Runtime: local XiaoBa **catscompany** surface (`createAdapterRuntime` + mutable-identity prompts). Not the CatsCo web connector (no login/users/WS bot). LLM from Host **Agent model** / `~/.remotepad/llm.json`.
-- Turn end: like CatsCo, always surface XiaoBa `result.text` when `visibleToUser` — including cancel (`已停止…`), fail, and empty-`max_tokens` notices after a partial stream. Track spoken text across tool flushes so a final notice is not dropped when earlier assistant text already streamed. Wire `onThinking` (compaction start/done) into the panel. Do not go idle silently.
-- Normal sessions: id `rp-*` (or legacy `remotepad`); cwd follows active repo or tree root.
-- Helper sessions: id `helper` (legacy) or `helper-*`. **cwd is one reusable git worktree**, not the live install: `~/.remotepad/helper-worktrees/work` on branch `helper/work` (`apps/server/src/agent/helper-worktree.ts`). Every Helper chat shares it — never create a tree per session, never a tree per edit. Live `repoRoot` stays what the user is running. **Refresh** wipes the Helper chat. Deleting a Helper chat does not delete the shared tree (only a merged tree is swept). Clicking a Repos row updates `rp-*` cwd only — it does not reload Helper.
-- **Commit & push** (Helper compose row): one-key `git add -A` + commit + `git push -u origin HEAD` for the helper branch. Never force-push; refuses `main`/`master`. Result lands as an Agent text/error line in the panel.
-- **Preview 2027:** the worktree `settings.json` is pinned to `port: 2028` / `uiPort: 2027` (`helperPreviewPorts`). The button seeds the worktree `tmp/session.json` from the live one with every live path rebased onto the worktree, runs `pnpm install` if `node_modules` is missing, then spawns `pnpm dev` detached in the worktree (log: `~/.remotepad/helper-preview.log`). So 2027 shows the same tabs/files as the live window, but reads and writes the worktree. Merge refuses to run from a preview instance.
-- **Merge → main:** commit+push the helper branch, `merge --ff-only` (fallback `--no-ff`) into live `main`, abort cleanly on conflict, then `stopHelperPreview` and sweep every worktree under `helper-worktrees/` whose branch is already merged into `main` (skips dirty trees, `branch -d`, `worktree prune`). The Helper cwd is reset so the next turn recreates `work` from the new `main`.
-- **Self-edit / `tsx watch`:** because Helper no longer writes the live tree, editing under the worktree does not restart the live Agent host. (If someone still points Helper at live, `pnpm dev:stable` avoids watch kills.)
-- Switching Agent tabs abandons an in-flight run (`runGen` + session lock in `host.ts`); the new tab must not stay stuck on Working / “already running”.
-- ChangeTracker is per session (`trackers` map + `get tracker()`); never call `.list()` on a missing tracker.
-- **Stop** must abandon the same way (`runGen++`, `sending=false`, idle, then `requestInterrupt`) and surface `已停止当前请求。` — interrupt alone waits on the provider abort and leaves Working stuck.
-- Two stores, same split as CatsCo: the panel transcript is what was delivered (`~/.remotepad/history/{id}.jsonl`, append-only, user line on Send, assistant text flushed before each tool, full tool print). XiaoBa's model context is only `~/.remotepad/xiaoba/data/sessions/{id}.jsonl` — it rewrites the whole file and stubs tool results after hidden reasoning (`历史工具结果已省略`). Do not copy that file into the panel transcript. `~/.remotepad/xiaoba/logs/` is the process logger, not a third chat.
-- Active id / titles: `~/.remotepad/agent-active.json`
+- Runtime lives in XiaoBa-CLI. This host only calls `createAdapterRuntime({ surface: 'catscompany' })`. LLM is Host **Agent model** / `~/.remotepad/llm.json`, else that XiaoBa tree's `.env`.
+- Sessions: id `rp-*` (or legacy `remotepad`). Cwd is the selected repo or the file-tree root. Not this install.
+- Turn end: surface XiaoBa `result.text` when `visibleToUser`, including cancel and fail notices. Do not go idle silently.
+- Switching tabs or **Stop** abandons the in-flight run (`runGen` in `host.ts`) so the panel does not stay on Working.
+- Delivered chat: `~/.remotepad/history/{id}.jsonl`. XiaoBa model context: `~/.remotepad/xiaoba/data/sessions/{id}.jsonl` (XiaoBa rewrites it; tool text may be stubbed). Logger: `~/.remotepad/xiaoba/logs/` (not the chat). Active id / titles: `~/.remotepad/agent-active.json`.
+- ChangeTracker is per session. Snapshot file tools in `onToolStart` (catscompany skips `confirmToolExecution`, so confirm-hook snapshots never run). Do not call `.list()` on a missing tracker.
+- Helper worktree, Preview, and Merge → main are not the product. Leave `helper-worktree.ts` alone unless the user asks to remove it.
 
 ## Git
 
-Helper work happens on `helper/work` in the one shared worktree. Flow: edit → **Preview 2027** → user tries it there → **Commit & push** (or straight to **Merge → main**) → merge lands it, deletes the worktree, stops 2027. Never push `main`. Never force-push.
+Work on a branch in this checkout when the user asks to persist. Never push `main`. Never force-push.
 
 ## Grep / edit hygiene
 

@@ -46,7 +46,7 @@ export function HelpPop({ onClose }: { onClose: () => void }) {
         </section>
         <section>
           <h3>Agent</h3>
-          <p><kbd>+</kbd> new general Agent (selected repo) · <kbd>☰</kbd> history · Helper <kbd>Refresh</kbd> wipes that chat (git + AGENTS.md keep the work)</p>
+          <p><kbd>+</kbd> new Agent session (selected repo) · <kbd>☰</kbd> history</p>
           <p><kbd>Enter</kbd> send · <kbd>Shift</kbd>+<kbd>Enter</kbd> newline</p>
         </section>
       </div>

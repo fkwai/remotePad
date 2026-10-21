@@ -795,7 +795,7 @@ button.tree-node:hover { border-color: transparent; }
   padding: 3px 8px;
 }
 .seg button.active { background: var(--accent-dim); color: var(--accent); }
-.editor-body { flex: 1; min-height: 0; position: relative; }
+.editor-body { flex: 1; min-height: 0; position: relative; display: flex; flex-direction: column; }
 .editor-body .monaco-editor { width: 100% !important; }
 .monaco-editor .decorationsOverviewRuler {
   display: none !important;
@@ -1073,6 +1073,11 @@ button.tree-node:hover { border-color: transparent; }
 .jsonl-card .body { padding: 8px 10px; }
 .log-view { height: 100%; margin: 0; white-space: pre-wrap; word-break: break-word; }
 
+.diff-monaco {
+  height: 100%;
+  min-height: 0;
+  flex: 1 1 0;
+}
 .diff-view {
   height: 100%;
   overflow: auto;
@@ -1081,8 +1086,8 @@ button.tree-node:hover { border-color: transparent; }
   padding: 8px 0;
 }
 .diff-line { padding: 0 12px; white-space: pre-wrap; }
-.diff-add { background: #14301f; color: #98c379; }
-.diff-del { background: #3a1518; color: #ef6e78; }
+.diff-add { background: #1b7a40; color: #d4f5e0; }
+.diff-del { background: #a82838; color: #ffd0d6; }
 .diff-hunk { color: #61afef; }
 
 .term-bar {

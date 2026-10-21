@@ -28,6 +28,9 @@ export interface OpenTab {
   error?: string;
   kind: ViewerKind;
   diff?: string;
+  /** Agent change: full text before / after for Cursor-style red-green. */
+  before?: string;
+  after?: string;
   agentPath?: string;
   temp?: boolean;
   /** Cache-bust token for image reloads (e.g. plot popup rewrite). */
@@ -267,9 +270,9 @@ export function EditorArea({
           )}
           {tab.agentPath && (
             <>
-              <span className="hint">{tab.agentPath}</span>
+              <span className="hint">Agent change</span>
               <span className="spacer" />
-              <button className="primary" onClick={() => onAcceptChange?.(tab.agentPath!)}>Accept</button>
+              <button className="primary" onClick={() => onAcceptChange?.(tab.agentPath!)}>Keep</button>
               <button className="danger" onClick={() => onUndoChange?.(tab.agentPath!)}>Undo</button>
             </>
           )}
@@ -319,10 +322,12 @@ export function EditorArea({
                 onLoad={onLoadDir}
               />
             )
+            : tab.agentPath && tab.before !== undefined && tab.after !== undefined
+            ? <DiffView path={tab.path} diff={tab.diff || ''} before={tab.before} after={tab.after} />
             : tab.viewMode === 'rendered' && hasRenderedView(tab.kind)
             ? <Rendered tab={tab} onInfo={setViewInfo} onChange={onChange} />
             : tab.kind === 'diff'
-              ? <DiffView diff={tab.diff || ''} path={tab.path} />
+              ? <DiffView path={tab.path} diff={tab.diff || ''} before={tab.before} after={tab.after} />
               : tab.binary
                 ? <div className="empty">Binary file — switch to rendered view if this is an image.</div>
                 : (
