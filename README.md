@@ -264,6 +264,7 @@ Click **RemotePad** in the top-left for the full help list. Common shortcuts (al
 - Drag paths into Editor / Terminal / Agent
 - Favorites & repos: right-click for explorer, startup, terminal, remove; drag to reorder
 - Click the computer name for host / git / terminals
+- Top bar **Update N** — `origin/main` has N commits this install does not; one click fast-forwards and reloads (it refuses a dirty tree or local commits, and rebuilds the web bundle when UI code moved)
 
 Favorites are stored in `~/.remotepad/favorites.json`. Home is pinned by default.
 
