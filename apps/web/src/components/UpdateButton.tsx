@@ -3,7 +3,7 @@ import type { UpdateResult, UpdateStatus } from '@remotepad/shared';
 import { api } from '../api';
 
 /**
- * "Behind origin" indicator in the top bar.
+ * Build indicator, next to the RemotePad wordmark (top left).
  *
  * The runtime polls its own checkout (GET /api/update). When origin has commits
  * this install does not, one click fast-forwards it (POST /api/update) and
@@ -39,18 +39,12 @@ export function UpdateButton({ onToast }: { onToast: (msg: string) => void }) {
     const name = status.branch ?? 'detached';
     const note = status.warning ? ` · ${status.warning}` : '';
     return (
-      <button
-        type="button"
-        className="version-chip"
-        title={`${status.repo} · ${name} @ ${status.head}${note} — click to copy the hash`}
-        onClick={() => {
-          const written = navigator.clipboard?.writeText(status.head as string);
-          written?.catch(() => undefined);
-          onToast(`Copied ${short}`);
-        }}
+      <span
+        className="version-badge"
+        title={`${status.repo} · ${name} @ ${status.head}${note}`}
       >
         {name}@{short}
-      </button>
+      </span>
     );
   }
 

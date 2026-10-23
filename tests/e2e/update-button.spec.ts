@@ -60,10 +60,12 @@ test.describe('update button', () => {
 
     await gotoApp(page);
     await expect(page.locator('.update-btn')).toHaveCount(0);
-    const chip = page.locator('.version-chip');
+    const chip = page.locator('.topbar .version-badge');
     await expect(chip).toBeVisible();
     await expect(chip).toHaveText(/^main@a{7}$/);
     await expect(chip).toHaveAttribute('title', /main @ a{40}/);
+    // It sits next to the RemotePad wordmark, not on the right.
+    await expect(page.locator('.topbar .brand + .version-badge')).toHaveCount(1);
   });
 
   test('stays hidden when the endpoint fails', async ({ page }) => {
