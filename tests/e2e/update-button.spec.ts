@@ -55,11 +55,15 @@ test.describe('update button', () => {
     await expect(button).toHaveAttribute('title', /local changes/);
   });
 
-  test('stays hidden when the install is up to date', async ({ page }) => {
+  test('shows the running branch and hash when there is nothing to pull', async ({ page }) => {
     await page.route('**/api/update', (route) => route.fulfill({ json: status() }));
 
     await gotoApp(page);
     await expect(page.locator('.update-btn')).toHaveCount(0);
+    const chip = page.locator('.version-chip');
+    await expect(chip).toBeVisible();
+    await expect(chip).toHaveText(/^main@a{7}$/);
+    await expect(chip).toHaveAttribute('title', /main @ a{40}/);
   });
 
   test('stays hidden when the endpoint fails', async ({ page }) => {

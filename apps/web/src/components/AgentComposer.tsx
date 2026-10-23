@@ -104,7 +104,10 @@ export const AgentComposer = forwardRef<ComposerHandle, Props>(function AgentCom
     chip.contentEditable = 'false';
     chip.dataset.ref = ref.token;
     chip.title = ref.path;
-    chip.textContent = ref.kind === 'term' ? 'terminal' : refLabel(ref);
+    const termLines = ref.kind === 'term' && ref.text ? ref.text.replace(/\n$/, '').split('\n').length : 0;
+    chip.textContent = ref.kind === 'term'
+      ? `terminal${termLines ? ` · ${termLines} line${termLines === 1 ? '' : 's'}` : ''}`
+      : refLabel(ref);
 
     const space = document.createTextNode('\u00a0');
     const el = editorRef.current;

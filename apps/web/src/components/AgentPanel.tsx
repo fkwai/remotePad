@@ -563,7 +563,11 @@ export function AgentPanel({
                       ? <span key={i} className="agent-msg-text">{part.text}</span>
                       : (
                         <span key={i} className="agent-ref-wrap">
-                          <span className="agent-ref" title={part.path}>{part.dir ? '/' : ''}{part.label}</span>
+                          <span className="agent-ref" title={part.path}>
+                            {part.dir ? '/' : ''}
+                            {part.label}
+                            {part.code ? ` · ${part.code.split('\n').length} lines` : ''}
+                          </span>
                           {part.code !== undefined && (
                             <details className="agent-ref-code">
                               <summary>{part.code.split('\n').length} lines</summary>

@@ -29,7 +29,30 @@ export function UpdateButton({ onToast }: { onToast: (msg: string) => void }) {
     return () => window.clearInterval(timer);
   }, [check]);
 
-  if (!status || status.behind === 0) return null;
+  if (!status) return null;
+
+  // Always show which build is running: on a feature branch there is no
+  // origin/<branch> to compare, and "nothing to update" still needs an answer.
+  if (status.behind === 0) {
+    if (!status.head) return null;
+    const short = status.head.slice(0, 7);
+    const name = status.branch ?? 'detached';
+    const note = status.warning ? ` · ${status.warning}` : '';
+    return (
+      <button
+        type="button"
+        className="version-chip"
+        title={`${status.repo} · ${name} @ ${status.head}${note} — click to copy the hash`}
+        onClick={() => {
+          const written = navigator.clipboard?.writeText(status.head as string);
+          written?.catch(() => undefined);
+          onToast(`Copied ${short}`);
+        }}
+      >
+        {name}@{short}
+      </button>
+    );
+  }
 
   const apply = async () => {
     setBusy(true);
