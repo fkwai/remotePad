@@ -64,12 +64,21 @@ export async function readSession(): Promise<SessionState> {
   }
 }
 
+/** Serialized so two UI requests cannot race on the same temp file.
+ *  The rename failed with ENOENT whenever session writes overlapped, which
+ *  surfaced as a 500 on /api/session and lost the layout state. */
+let sessionWrite: Promise<unknown> = Promise.resolve();
+
 export async function writeSession(input: SessionState): Promise<SessionState> {
   const state = asState(input);
-  await fs.mkdir(path.dirname(SESSION_PATH), { recursive: true });
-  const json = JSON.stringify(state, null, 2);
-  const tmp = SESSION_PATH + '.tmp';
-  await fs.writeFile(tmp, json);
-  await fs.rename(tmp, SESSION_PATH);
-  return state;
+  const run = sessionWrite.then(async () => {
+    await fs.mkdir(path.dirname(SESSION_PATH), { recursive: true });
+    // A per-write temp name keeps this safe even across processes.
+    const tmp = `${SESSION_PATH}.${process.pid}.${Date.now()}.tmp`;
+    await fs.writeFile(tmp, JSON.stringify(state, null, 2));
+    await fs.rename(tmp, SESSION_PATH);
+    return state;
+  });
+  sessionWrite = run.catch(() => undefined);
+  return run;
 }

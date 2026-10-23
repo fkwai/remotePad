@@ -1086,8 +1086,16 @@ button.tree-node:hover { border-color: transparent; }
   padding: 8px 0;
 }
 .diff-line { padding: 0 12px; white-space: pre-wrap; }
-.diff-add { background: #1b7a40; color: #d4f5e0; }
-.diff-del { background: #a82838; color: #ffd0d6; }
+.diff-add {
+  background: rgba(63, 185, 80, 0.28);
+  color: inherit;
+  box-shadow: inset 2px 0 rgba(63, 185, 80, 0.85);
+}
+.diff-del {
+  background: rgba(248, 81, 73, 0.28);
+  color: inherit;
+  box-shadow: inset 2px 0 rgba(248, 81, 73, 0.85);
+}
 .diff-hunk { color: #61afef; }
 
 .term-bar {
@@ -1139,6 +1147,44 @@ button.tree-node:hover { border-color: transparent; }
 .info h3:first-child { margin-top: 4px; }
 .info .kv { color: var(--muted); font-family: var(--mono); font-size: 12px; word-break: break-all; }
 .info .kv b { color: var(--text); font-weight: 550; }
+.agent-backend {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 8px 0;
+  flex: 0 0 auto;
+}
+.agent-backend .seg { flex: 0 0 auto; }
+.agent-backend-hint {
+  font-size: 11px;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+.agent-tab.catsco .agent-tab-title { font-style: italic; color: var(--accent, #8aead0); }
+.catsco-status { display: flex; flex-direction: column; gap: 6px; margin-bottom: 4px; }
+.catsco-row { display: flex; align-items: flex-start; gap: 8px; }
+.catsco-dot {
+  width: 8px; height: 8px; border-radius: 50%;
+  margin-top: 5px; flex: 0 0 auto;
+  background: var(--muted);
+}
+.catsco-dot.online { background: var(--ok); }
+.catsco-dot.account_ok { background: #e6c07b; }
+.catsco-dot.offline, .catsco-dot.unreachable { background: var(--danger); }
+.catsco-dot.unknown { background: var(--muted); }
+.catsco-summary { color: var(--text); font-size: 12px; line-height: 1.35; }
+.catsco-actions { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.catsco-actions .linkish {
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+}
+.info .kv.muted { opacity: 0.85; }
+.info .kv.warn { color: var(--danger); }
 .llm-form { display: flex; flex-direction: column; gap: 6px; }
 .llm-form label { display: flex; flex-direction: column; gap: 3px; font-size: 11px; color: var(--muted); }
 .llm-save { align-self: flex-start; margin-top: 2px; }
@@ -1449,6 +1495,90 @@ button.tree-node:hover { border-color: transparent; }
   letter-spacing: 0.04em;
   text-transform: uppercase;
 }
+/* CatsCo left list: bots / projects / conversations */
+.agent-catsco {
+  flex: 0 0 264px;
+}
+.agent-catsco-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding-bottom: 8px;
+}
+.agent-catsco-label {
+  padding: 10px 8px 4px;
+  color: var(--faint);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.agent-catsco-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 8px;
+  font-size: 12px;
+  cursor: pointer;
+  border-radius: 5px;
+}
+.agent-catsco-row:hover { background: var(--panel-3); }
+.agent-catsco-row.active { background: #1a2744; }
+.agent-catsco-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--faint);
+  flex: 0 0 auto;
+}
+.agent-catsco-row.active .agent-catsco-dot { background: #4ec9a0; }
+.agent-catsco-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.agent-catsco-new {
+  display: flex;
+  gap: 4px;
+  padding: 0 8px 6px;
+}
+.agent-catsco-new input {
+  flex: 1;
+  min-width: 0;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 4px 8px;
+  color: inherit;
+  font: inherit;
+  font-size: 12px;
+  outline: none;
+}
+.agent-catsco-new input:focus { border-color: #4a7f73; }
+.agent-catsco-project-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 8px;
+  font-size: 12px;
+  cursor: pointer;
+  color: var(--muted);
+}
+.agent-catsco-project-head:hover { background: var(--panel-3); }
+.agent-catsco-caret { width: 10px; flex: 0 0 auto; }
+.agent-catsco-project-head .agent-catsco-name { font-weight: 550; color: inherit; }
+.agent-catsco-project .agent-session { padding-left: 18px; }
+.agent-catsco-session .agent-session-row { gap: 6px; }
+.agent-catsco-error {
+  margin: 8px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: rgba(200, 60, 60, 0.12);
+  color: #e08a8a;
+  font-size: 11px;
+  line-height: 1.4;
+}
 .agent-session-time {
   flex: 0 0 auto;
   font-size: 10px;
@@ -1703,6 +1833,48 @@ button.tree-node:hover { border-color: transparent; }
   font-size: 12px;
   font-style: italic;
   padding: 2px 4px;
+}
+/* One compact line per tool run, like the cloud app: expand only on demand. */
+.agent-steps { display: flex; flex-direction: column; gap: 4px; padding: 0 2px; }
+.agent-steps-head {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: 0;
+  padding: 3px 6px;
+  border-radius: 5px;
+  color: var(--faint);
+  font-size: 11px;
+  cursor: pointer;
+}
+.agent-steps-head:hover { background: var(--panel-3); }
+.agent-steps-label { font-variant-numeric: tabular-nums; }
+.agent-steps.open .agent-steps-label { color: var(--text); }
+.agent-typing {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--faint);
+  font-size: 12px;
+  padding: 2px 4px;
+}
+.agent-dots { display: inline-flex; gap: 3px; align-items: center; }
+.agent-dots i {
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: currentColor;
+  opacity: 0.35;
+  animation: agent-dot 1.2s infinite ease-in-out;
+}
+.agent-dots i:nth-child(2) { animation-delay: 0.15s; }
+.agent-dots i:nth-child(3) { animation-delay: 0.3s; }
+@keyframes agent-dot {
+  0%, 60%, 100% { opacity: 0.25; transform: translateY(0); }
+  30% { opacity: 1; transform: translateY(-2px); }
 }
 .agent-msg.status { color: var(--danger); background: #3a151822; }
 .agent-compose {

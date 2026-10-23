@@ -2,7 +2,7 @@
 
 RemotePad is the browser UI (files, editor, terminal, agent chat). It does not own the agent runtime. XiaoBa-CLI is a separate tree (`REMOTEPAD_XIAOBA_PATH`, default sibling `../XiaoBa-CLI`). CatsCo maintains that runtime. This repo only embeds it.
 
-There is no Helper agent in the current product. Do not add a worktree, a second port, or a merge-back-into-this-install flow. Agent sessions (`rp-*`) edit the selected repo, not RemotePad. Code under `helper-worktree.ts` and the Helper buttons are leftover; do not extend them.
+There is no Helper agent in the current product. Do not add a worktree, a second port, or a merge-back-into-this-install flow. Agent sessions (`rp-*`) edit the selected repo, not RemotePad. Code under `helper-worktree.ts` is leftover; the Agent panel no longer shows Commit & push / Preview / Merge → main — do not bring those buttons back.
 
 ## Mission
 
@@ -53,10 +53,13 @@ UI regions (product names): **Sidebar** (left), **Editor** (middle top), **Termi
 | Open-file popup API | `apps/server/src/routes/ui.ts`, `ui-bus.ts` (`POST /api/ui/open`) |
 | Agent tabs / chat | `apps/web/src/components/AgentPanel.tsx`, `RightDock.tsx` |
 | Agent host (XiaoBa embed) | `apps/server/src/agent/host.ts`, `ws.ts` — loads XiaoBa-CLI `createAdapterRuntime` (`surface: catscompany`). Not a CatsCo login, and not a runtime this repo maintains. |
+| CatsCo connector status | Host pop **CatsCo** (`CatsCoStatus.tsx`). `GET /api/catsco` → XiaoBa Dashboard `GET /api/cats/status` (`REMOTEPAD_CATSCO_DASHBOARD`, default `http://127.0.0.1:3800`). Read-only: does **not** start/stop connector. |
+| Agent backend | Panel **Local** \| **CatsCo** toggle. Preference `~/.remotepad/agent-backend.json`. Local = embed XiaoBa (`~/.remotepad/xiaoba`). CatsCo = Dashboard `/api/cats/messages/send` + poll on the selected topic (`catsco-chat.ts`); same cloud employee and conversations as app.catsco.cc. Does not start a second connector. |
+| CatsCo left panel | In CatsCo mode `☰` opens a docked workspace list: **Bots** (current binding), **Projects** (＋ creates one), each project's agent tasks (＋ creates a task in it, `POST /api/cats/tasks`), and **Chats** (p2p / groups). Click a row to switch topic; selection persists at `~/.remotepad/catsco-selection.json`. Data comes from the local XiaoBa Dashboard: `GET /api/cats/bots|projects|conversations`, `POST /api/cats/projects|tasks`, `POST /api/cats/switch-bot` — rebuild and restart that Dashboard for the project/task routes to appear. |
 | Workspaces / Repos store | `~/.remotepad/workspaces.json` (server routes under `apps/server`) |
 | Favorites | `~/.remotepad/favorites.json` |
 | Host / ports | `settings.json` at install root (`host`, `port`, `uiPort`; env overrides) |
-| Agent model | `~/.remotepad/llm.json` (DeepSeek key + model + maxTokens; not in git). Host pop **Agent model** form. `GET/PUT /api/llm`. Default max output tokens `32768` → `GAUZ_LLM_MAX_TOKENS`. Applied over XiaoBa `.env` on the next Agent message. |
+| Agent model | `~/.remotepad/llm.json` (DeepSeek key + model + maxTokens; not in git). Host pop **Agent model** form. `GET/PUT /api/llm`. Default model `deepseek-flash` over OpenAI Chat Completions (`GAUZ_LLM_PROVIDER=openai`, `GAUZ_LLM_OPENAI_API_MODE=chat_completions`). Default max output tokens `32768` → `GAUZ_LLM_MAX_TOKENS`. Applied over XiaoBa `.env` on the next Agent message. |
 | Viewer modules | `packages/shared/src/modules.ts` catalog; enabled flags in `~/.remotepad/modules.json`; `GET/PUT /api/modules`; Host pop (computer name) toggles load/unload. Core is always code + folder + diff. Optional: markdown, json, jsonl, csv, image, html, log. Disabled types open as code. New modules should `defaultOn: false`. |
 | UI session restore | `tmp/session.json` under this repo |
 | Shared protocol | `packages/shared/src/index.ts` |
@@ -111,7 +114,7 @@ If a job is about click / double-click / reveal / scroll, read this table first.
 | Editor **body** | Shift+Enter (`.py`) | Dedent selection and wrap in `exec(compile(...))` so REPL `if`/`else` blocks are not broken by blank lines; other languages paste raw |
 | Editor **body** (Monaco) | double-click | word select; not reveal-in-tree |
 | Editor **body** (PNG / HTML) | Ctrl+scroll | Zoom that preview only; does not zoom the browser page |
-| Host pop (computer name) | click | host / git / terminals · **Agent model** (DeepSeek key + model + max output tokens) · **Viewer modules** on/off |
+| Host pop (computer name) | click | host / git / terminals · **CatsCo** (existing desktop connector status) · **Agent model** (DeepSeek key + model + max output tokens) · **Viewer modules** on/off |
 | Editor **status** bar | `</>` on the left · `Ctrl/⌘+L` | toggle source / rendered for viewer modules; only bar besides the tab strip |
 | Editor **body** (image) | left click | pick a pixel; `x` `y` grey (plus RGB if color) on the same bottom status bar |
 | File tree rows | indent | chevron `>` and file marks share one column at the same depth (files must not sit extra-indented) |
@@ -127,17 +130,20 @@ If a job is about click / double-click / reveal / scroll, read this table first.
 | Agent compose | — | pinned at bottom (never clipped); input stays enabled while running |
 | Agent transcript | — | You / Agent roles; tool rows start folded (▸) and show the first line of the saved print — expand for the full output RemotePad kept (XiaoBa's session file may only have a stub); a jump-to-bottom ↓ button appears once you scroll up more than one viewport from the bottom |
 | Agent changes list | click a row | opens the **real file** tab (same name/path) in inline red/green review (`before`/`after`); Keep / Undo on the toolbar — no separate `(modify)` tab |
-| Agent `+` | click | new `rp-*` session (cwd follows the selected repo) |
+| Agent backend | Local / CatsCo | Local = in-process XiaoBa; CatsCo = cloud list + selected topic (history from Dashboard, not a locked live session). Switching backends always abandons an in-flight run and reloads the transcript — Local stays clickable while CatsCo is Working. |
+| Agent `+` | click | new `rp-*` session (cwd follows the selected repo); hidden in CatsCo mode |
+| CatsCo workspace `☰` | click | toggles the left list (shows Loading… until Dashboard bots/projects/conversations arrive; ⟳ reloads); row click opens that conversation; project ＋ creates a task; bot row click rebinds the device (confirm prompt) |
 
 ## Agent sessions
 
 - Runtime lives in XiaoBa-CLI. This host only calls `createAdapterRuntime({ surface: 'catscompany' })`. LLM is Host **Agent model** / `~/.remotepad/llm.json`, else that XiaoBa tree's `.env`.
+- Local skill reload: attach `RuntimeFactory.loadSkills` (warn) to the session. Default `SkillManager.loadSkills()` is fail-fast; missing bundled XiaoBa skills (`skills/xiaoba-knowledge`, `skills/catsco-prompt-editor`) throw ENOENT and XiaoBa maps that to `模型服务暂时不稳定`. Initial load uses the session's skill manager, not the unused adapter copy.
 - Sessions: id `rp-*` (or legacy `remotepad`). Cwd is the selected repo or the file-tree root. Not this install.
 - Turn end: surface XiaoBa `result.text` when `visibleToUser`, including cancel and fail notices. Do not go idle silently.
 - Switching tabs or **Stop** abandons the in-flight run (`runGen` in `host.ts`) so the panel does not stay on Working.
 - Delivered chat: `~/.remotepad/history/{id}.jsonl`. XiaoBa model context: `~/.remotepad/xiaoba/data/sessions/{id}.jsonl` (XiaoBa rewrites it; tool text may be stubbed). Logger: `~/.remotepad/xiaoba/logs/` (not the chat). Active id / titles: `~/.remotepad/agent-active.json`.
 - ChangeTracker is per session. Snapshot file tools in `onToolStart` (catscompany skips `confirmToolExecution`, so confirm-hook snapshots never run). Do not call `.list()` on a missing tracker.
-- Helper worktree, Preview, and Merge → main are not the product. Leave `helper-worktree.ts` alone unless the user asks to remove it.
+- Helper worktree APIs remain in the host for now; the Agent UI does not expose Publish / Preview / Merge. Leave `helper-worktree.ts` alone unless the user asks to remove it.
 
 ## Git
 

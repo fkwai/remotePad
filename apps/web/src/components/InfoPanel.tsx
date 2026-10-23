@@ -1,6 +1,7 @@
 import type { GitStatusResponse, MachineInfo, TermSessionInfo, ViewerModuleId } from '@remotepad/shared';
 import { VIEWER_MODULES } from '@remotepad/shared';
 import { basename } from '../files';
+import { CatsCoStatus } from './CatsCoStatus';
 import { LlmSettings } from './LlmSettings';
 
 export function InfoPanel({
@@ -51,6 +52,8 @@ export function InfoPanel({
             ))}
           </>
         )}
+        <h3>CatsCo</h3>
+        <CatsCoStatus />
         <h3>Agent model</h3>
         <LlmSettings />
         <h3>Viewer modules</h3>

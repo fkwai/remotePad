@@ -3,11 +3,46 @@ import os from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { execFileSync } from 'node:child_process';
-import type { AgentChange, AgentHistoryItem, AgentServerMessage, AgentSessionInfo, AgentStatus } from '@remotepad/shared';
+import type { AgentBackend, AgentChange, AgentHistoryItem, AgentServerMessage, AgentSessionInfo, AgentStatus } from '@remotepad/shared';
 import { isHelperSessionId } from '@remotepad/shared';
 import { config } from '../config.ts';
 import { applyLlmSettingsToEnv } from '../llm-settings.ts';
+import {
+  createCatsCoProject as createProjectApi,
+  createCatsCoTask as createTaskApi,
+  fetchCatsCoMessages,
+  cancelCatsCoRun,
+  listCatsCoBots,
+  listCatsCoConversations,
+  listCatsCoProjects,
+  resolveCatsCoChatTarget,
+  sendCatsCoMessage,
+  switchCatsCoBot as switchBotApi,
+  type CatsCoBot,
+  type CatsCoConversation,
+} from '../catsco-chat.ts';
 import { ChangeTracker } from './changes.ts';
+import { TurnSnapshot } from './turn-snapshot.ts';
+import {
+  mergeCatsCoTranscript,
+  readCatsCoTranscript,
+  type StoredCatsCoMessage,
+} from '../catsco-store.ts';
+
+/** Local rows are emitted without the cloud id. */
+function toHistoryItem(item: StoredCatsCoMessage): AgentHistoryItem {
+  return { role: item.role, text: item.text, name: item.name };
+}
+
+/** Cloud row → local row. Roles are narrowed here, once. */
+function toStoredRow(m: { id: number; role: string; text: string; name?: string }): StoredCatsCoMessage {
+  return {
+    id: Number(m.id),
+    role: m.role === 'tool' ? 'tool' : m.role === 'user' ? 'user' : 'assistant',
+    text: m.text,
+    name: m.name,
+  };
+}
 import {
   ensureHelperWorktree,
   helperWorktreePath,
@@ -18,6 +53,10 @@ import {
 } from './helper-worktree.ts';
 
 type Listener = (msg: AgentServerMessage) => void;
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 type ToolConfirmRequest = {
   toolName: string;
@@ -44,6 +83,7 @@ type XiaobaSession = {
   isBusy: () => boolean;
   cleanup?: () => Promise<void>;
   setSystemPromptProvider?: (provider: SystemPromptProvider) => void;
+  setSkillReloadHandler?: (handler: () => Promise<void>) => void;
 };
 
 /** Match CatsCo: classify a returned turn when taskOutcome is missing. */
@@ -179,6 +219,39 @@ function llmFingerprint(): string {
 }
 
 const ACTIVE_SESSION_PATH = path.join(os.homedir(), '.remotepad', 'agent-active.json');
+const BACKEND_PATH = path.join(os.homedir(), '.remotepad', 'agent-backend.json');
+const CATSCO_SELECTION_PATH = path.join(os.homedir(), '.remotepad', 'catsco-selection.json');
+
+/** Last CatsCo conversation the panel was on (topic id). */
+function readCatsCoSelection(): { topicId: string } {
+  try {
+    const raw = JSON.parse(fs.readFileSync(CATSCO_SELECTION_PATH, 'utf8')) as { topicId?: string };
+    return { topicId: String(raw.topicId || '') };
+  } catch {
+    return { topicId: '' };
+  }
+}
+
+function writeCatsCoSelection(value: { topicId: string }): void {
+  try {
+    fs.mkdirSync(path.dirname(CATSCO_SELECTION_PATH), { recursive: true });
+    fs.writeFileSync(CATSCO_SELECTION_PATH, `${JSON.stringify(value, null, 2)}\n`, { mode: 0o600 });
+  } catch { /* selection is a convenience, never fatal */ }
+}
+
+function readBackend(): AgentBackend {
+  try {
+    const raw = JSON.parse(fs.readFileSync(BACKEND_PATH, 'utf8')) as { backend?: string };
+    return raw.backend === 'catsco' ? 'catsco' : 'local';
+  } catch {
+    return 'local';
+  }
+}
+
+function writeBackend(backend: AgentBackend): void {
+  fs.mkdirSync(path.dirname(BACKEND_PATH), { recursive: true });
+  fs.writeFileSync(BACKEND_PATH, `${JSON.stringify({ backend }, null, 2)}\n`, { mode: 0o600 });
+}
 
 type SessionMeta = {
   id: string;
@@ -565,6 +638,25 @@ function loadMods(): XiaobaMods {
   }
 }
 
+/** Paths a tool call touched, read from the connector's args summary. */
+function eventPaths(detail: string | undefined, cwd: string): string[] {
+  if (!detail) return [];
+  let parsed: Record<string, unknown>;
+  try {
+    parsed = JSON.parse(detail) as Record<string, unknown>;
+  } catch {
+    return [];
+  }
+  const out: string[] = [];
+  for (const key of ['file_path', 'path', 'target']) {
+    const raw = parsed[key];
+    if (typeof raw !== 'string' || !raw.trim()) continue;
+    const abs = path.isAbsolute(raw) ? path.resolve(raw) : path.resolve(cwd, raw);
+    if (!out.includes(abs)) out.push(abs);
+  }
+  return out;
+}
+
 function toolPath(args: Record<string, unknown> | undefined, cwd: string): string | null {
   if (!args) return null;
   const raw = args.file_path ?? args.path ?? args.target;
@@ -583,8 +675,34 @@ export class AgentHost {
   private envStamp = '';
   private sessionId = '';
   private helperLastUser = '';
+  private backend: AgentBackend = readBackend();
+  /** Selected CatsCo conversation (topic). Empty = fall back to the bound bot's p2p. */
+  private catscoTopic = readCatsCoSelection().topicId;
+  /** Last list payload, reused by the cloud-state poller. */
+  private catscoBots: CatsCoBot[] = [];
+  private catscoProjects: Array<{ id: number; name: string }> = [];
+  private catscoListTimer: ReturnType<typeof setInterval> | null = null;
+  /** Identifies the newest send, so an abandoned turn cannot clear the flag. */
+  private sendSeq = 0;
+  /** Last cloud seq rendered, so the poller only redraws on real changes. */
+  private catscoSeq = 0;
+  /** Was the open turn running on the previous poll? Drives the single closing fetch. */
+  private catscoWasWorking = false;
+  /** Paths a tool call touched, kept from its start event until it ends. */
+  private rpcPaths = new Map<string, string[]>();
+  /** What the pane already shows, so an unchanged refresh stays silent. */
+  private catscoEmitTopic = '';
+  private catscoEmitSig = '';
+  /** Seq whose last message is the bot's closing text: that turn is over, whatever
+   *  the cloud still reports as the task state. Group topics otherwise stay
+   *  "running" forever and the panel keeps offering Stop. */
+  private catscoFinalSeq = 0;
+  private catscoTitle = '';
+  private catscoUserUid = '';
   /** One tracker per session: a file touched by one chat must not show in another. */
   private trackers = new Map<string, ChangeTracker>();
+  /** What this turn started from; used when no tool event described the write. */
+  private turnSnapshot = new TurnSnapshot();
   private sending = false;
   /** Bumped on every session switch so an in-flight send cannot touch the new tab. */
   private runGen = 0;
@@ -625,7 +743,16 @@ export class AgentHost {
     return () => { this.listeners.delete(fn); };
   }
 
-  snapshot(): { cwd: string; model?: string; error?: string; sessionId?: string; sessions: AgentSessionInfo[]; changes: AgentChange[]; state: AgentStatus } {
+  snapshot(): {
+    cwd: string;
+    model?: string;
+    error?: string;
+    sessionId?: string;
+    sessions: AgentSessionInfo[];
+    changes: AgentChange[];
+    state: AgentStatus;
+    backend: AgentBackend;
+  } {
     return {
       cwd: this.cwd,
       model: this.model || undefined,
@@ -634,6 +761,7 @@ export class AgentHost {
       sessions: listSessions(this.sessionId),
       changes: this.tracker.list(),
       state: this.status,
+      backend: this.backend,
     };
   }
 
@@ -649,16 +777,19 @@ export class AgentHost {
     this.emit({ type: 'sessions', sessions: listSessions(this.sessionId) });
   }
 
-  private emitReady(cwd = this.cwd, includeHistory = true): void {
+  private emitReady(cwd = this.cwd, includeHistory = true, history?: AgentHistoryItem[]): void {
     this.emit({
       type: 'ready',
       cwd,
       model: this.model || undefined,
       error: this.error,
       sessionId: this.sessionId || undefined,
-      history: includeHistory && this.sessionId ? readTranscriptHistory(this.sessionId, this.toolPrint) : undefined,
+      history: history ?? (includeHistory && this.sessionId && this.backend === 'local'
+        ? readTranscriptHistory(this.sessionId, this.toolPrint)
+        : undefined),
       sessions: listSessions(this.sessionId),
       changes: this.tracker.list(),
+      backend: this.backend,
     });
   }
 
@@ -685,6 +816,13 @@ export class AgentHost {
     bundle: XiaobaBundle,
     adapter: AdapterRuntimeBundle,
   ): void {
+    // AgentSession defaults to SkillManager.loadSkills() (fail-fast). Bundled
+    // XiaoBa skills (xiaoba-knowledge, catsco-prompt-editor) may be missing
+    // from this checkout; that throw is classified as 模型服务暂时不稳定.
+    // CatsCo's MessageSessionManager uses RuntimeFactory.loadSkills (warn).
+    bundle.session.setSkillReloadHandler?.(() =>
+      loaded.RuntimeFactory.loadSkills(bundle.services.skillManager),
+    );
     if (!bundle.session.setSystemPromptProvider) return;
     const factory = adapter.sessionManagerOptions.systemPromptProviderFactory;
     let baseProvider: SystemPromptProvider | undefined;
@@ -719,12 +857,447 @@ export class AgentHost {
       this.uiCwd = path.resolve(cwd || process.cwd());
       ensureHelperMeta();
       if (!this.sessionId) this.sessionId = readActiveSessionId();
+      if (this.backend === 'catsco') {
+        // The "already emitted" gate is server-wide, but a reloaded page or a
+        // second tab has shown nothing yet. Without this reset its first history
+        // was suppressed and the pane stayed empty.
+        if (includeHistory) this.catscoEmitTopic = '';
+        await this.enterCatsCo(includeHistory);
+        this.emit({ type: 'status', state: this.status });
+        return;
+      }
       await this.ensureSession(this.resolveCwd());
       this.emitReady(this.resolveCwd(), includeHistory);
       this.emit({ type: 'status', state: this.status });
     } catch (err) {
       this.error = err instanceof Error ? err.message : String(err);
       this.emitReady(this.resolveCwd());
+    }
+  }
+
+  async setBackend(backend: AgentBackend): Promise<void> {
+    if (backend !== 'local' && backend !== 'catsco') return;
+    // Same backend click still reloads (CatsCo left list is easy to miss after a WS blip).
+    if (this.backend === backend) {
+      if (backend === 'catsco') await this.enterCatsCo(true);
+      else {
+        const history = this.sessionId
+          ? readTranscriptHistory(this.sessionId, this.toolPrint)
+          : [];
+        this.emitReady(this.resolveCwd(), false, history);
+        this.emit({ type: 'backend', backend: 'local', model: this.model || undefined });
+      }
+      return;
+    }
+    // Abandon any in-flight CatsCo poll / local turn. CatsCo chat is cloud-backed
+    // (Dashboard messages), not a locked live session — Local must always be reachable.
+    this.runGen += 1;
+    const gen = this.runGen;
+    this.sending = false;
+    this.status = 'idle';
+    this.bundle?.session.requestInterrupt();
+    this.backend = backend;
+    // The client drops its transcript when the backend changes, so the next
+    // history emit must not be suppressed as "already shown".
+    this.catscoEmitTopic = '';
+    writeBackend(backend);
+    this.error = undefined;
+    this.emit({ type: 'status', state: 'idle', message: 'backend' });
+    this.emit({
+      type: 'backend',
+      backend,
+      model: backend === 'catsco' ? 'catsco/cloud' : (this.model || undefined),
+    });
+    if (backend === 'catsco') {
+      await this.enterCatsCo(true, gen);
+      return;
+    }
+    this.stopCatsCoListPoller();
+    // Come back to Local with a rebuilt session so the kept tabs re-read their
+    // transcript from disk instead of showing what they had before the switch.
+    this.envStamp = '';
+    await this.ensureSession(this.resolveCwd());
+    if (this.runGen !== gen || this.backend !== 'local') return;
+    // Always pass an array so the UI replaces CatsCo messages (undefined would keep them).
+    const history = this.sessionId
+      ? readTranscriptHistory(this.sessionId, this.toolPrint)
+      : [];
+    this.emitReady(this.resolveCwd(), false, history);
+    this.emit({ type: 'backend', backend: 'local', model: this.model || undefined });
+    this.emit({ type: 'status', state: 'idle', message: 'backend' });
+  }
+
+  /** Fold the turn's file changes in and publish the list. */
+  private async applyTurnChanges(): Promise<void> {
+    const changed = await this.turnSnapshot.finish().catch(() => []);
+    const touched: string[] = [];
+    for (const item of changed) {
+      if (await this.tracker.trackWithOriginal(item.abs, item.before)) touched.push(item.abs);
+    }
+    this.emitChanges(touched.length ? touched : this.tracker.list().map((item) => item.path));
+  }
+
+  /** Push whatever the tools have touched. Nothing is discovered by scanning git:
+   *  a dirty file may belong to another session or to the user. */
+  private async harvestCatsCoChanges(): Promise<void> {
+    this.emitChanges(this.tracker.list().map((item) => item.path));
+  }
+
+  /** Redraw the open conversation when the cloud wrote new messages.
+   *
+   * Without this the panel only moved when remotePad itself sent: a task started
+   * from the CatsCo app, or the closing message of any turn, never appeared.
+   */
+  /** One cheap probe decides whether anything is new: the newest message id.
+   *
+   * History lives locally, so a sync appends a few rows or does nothing.
+   * Re-rendering the whole transcript on every tick was the churn.
+   */
+  private async syncCatsCoTranscript(force = false): Promise<{ changed: boolean }> {
+    const topic = this.catscoTopic;
+    if (!topic || this.sending) return { changed: false };
+    const stored = readCatsCoTranscript(topic);
+    try {
+      const newest = await fetchCatsCoMessages(topic, this.catscoUserUid, 1);
+      if (this.backend !== 'catsco' || this.sending) return { changed: false };
+      const newestId = Number(newest[newest.length - 1]?.id || 0);
+      if (!force && stored && newestId && newestId === stored.lastId) return { changed: false };
+      const window = newestId && stored && newestId !== stored.lastId
+        ? await fetchCatsCoMessages(topic, this.catscoUserUid, 60)
+        : newest;
+      if (this.backend !== 'catsco' || this.sending) return { changed: false };
+      const rows: StoredCatsCoMessage[] = window
+        .filter((m) => m.role === 'user' || m.role === 'assistant' || m.role === 'tool')
+        .map(toStoredRow)
+        .filter((m) => Number.isFinite(m.id) && m.id > 0);
+      const merged = mergeCatsCoTranscript(topic, rows);
+      const tail = merged.messages[merged.messages.length - 1];
+      this.catscoFinalSeq = tail && tail.role === 'assistant' && tail.text.trim() ? tail.id : 0;
+      if (merged.changed) {
+        this.emitReady(this.resolveCwd(), false, this.historyForEmit(topic, merged.messages));
+      }
+      return { changed: merged.changed };
+    } catch {
+      // A failed sync keeps whatever is on screen.
+      return { changed: false };
+    }
+  }
+
+  /** The connector pushed an event: react now instead of on the next tick. */
+  async ingestCatsCoEvent(event: {
+    kind?: string;
+    topic?: string;
+    requestId?: string;
+    phase?: 'start' | 'end';
+    tool?: string;
+    ok?: boolean;
+    detail?: string;
+  }): Promise<void> {
+    if (this.backend !== 'catsco') return;
+    if (event.kind === 'tool') {
+      // Files the call touched. This runs even while our own turn is in flight:
+      // the panel's step list already streams from the transcript, but the change
+      // list has no other source, so skipping here lost every edit.
+      // The end event carries no args, so the paths are remembered by request id.
+      const rpcKey = event.requestId || '';
+      const paths = event.phase === 'start'
+        ? eventPaths(event.detail, this.uiCwd || this.resolveCwd())
+        : (this.rpcPaths.get(rpcKey) ?? []);
+      if (event.phase === 'start') {
+        if (rpcKey) this.rpcPaths.set(rpcKey, paths);
+        for (const item of paths) await this.tracker.snapshotBeforeWrite(item);
+      } else {
+        if (rpcKey) this.rpcPaths.delete(rpcKey);
+        for (const item of paths) await this.tracker.refresh(item);
+        if (paths.length) this.emitChanges(paths);
+      }
+      // Steps for a turn this panel started already stream from its own loop.
+      if (this.sending) return;
+      const id = `catsco-rpc-${event.requestId || Date.now()}`;
+      const name = event.tool || 'tool';
+      if (event.phase === 'start') {
+        this.catscoWasWorking = true;
+        if (this.status !== 'running') {
+          this.status = 'running';
+          this.emit({ type: 'status', state: 'running' });
+        }
+        this.emit({ type: 'tool_start', name, id });
+      } else {
+        this.emit({ type: 'tool_end', name, id, ok: event.ok !== false, result: event.detail || '' });
+      }
+      return;
+    }
+    if (event.kind === 'message') {
+      // Covered by the step stream; pulling here would duplicate the turn.
+      return;
+    }
+    void this.pollCatsCoState().catch(() => undefined);
+  }
+
+  /** Poll the cloud task state so the panel can disable Send while the agent runs. */
+  private startCatsCoListPoller(): void {
+    if (this.catscoListTimer) return;
+    this.catscoListTimer = setInterval(() => { void this.pollCatsCoState(); }, 2500);
+    this.catscoListTimer.unref?.();
+  }
+
+  private stopCatsCoListPoller(): void {
+    if (!this.catscoListTimer) return;
+    clearInterval(this.catscoListTimer);
+    this.catscoListTimer = null;
+  }
+
+  private async pollCatsCoState(): Promise<void> {
+    if (this.backend !== 'catsco') {
+      this.stopCatsCoListPoller();
+      return;
+    }
+    try {
+      const conversations = await listCatsCoConversations();
+      if (this.backend !== 'catsco') return;
+      // Self-heal a turn that was abandoned mid-flight (topic switch, dropped
+      // poll): if the cloud says the task is done and we are not sending, the
+      // panel must not stay locked on "working" forever.
+      const raw = conversations.find((item) => item.id === this.catscoTopic);
+      const cloudWorking = Boolean(raw?.working);
+      // While a turn runs, steps arrive from the connector, so pulling the whole
+      // transcript every tick is the churn we set out to remove. Once it stops,
+      // one sync brings the closing text — before anything is judged.
+      const justFinished = this.catscoWasWorking && !cloudWorking;
+      const justStarted = !this.catscoWasWorking && cloudWorking;
+      this.catscoWasWorking = cloudWorking;
+      // A turn started from the CatsCo app never passes through send(): take the
+      // baseline here so its edits are still attributed to this conversation.
+      if (justStarted) await this.turnSnapshot.capture(this.uiCwd || this.resolveCwd());
+      if (justFinished) await this.applyTurnChanges();
+      if (!cloudWorking) await this.syncCatsCoTranscript(justFinished);
+      if (cloudWorking) await this.harvestCatsCoChanges().catch(() => undefined);
+
+      const settled = this.settleTurn(conversations);
+      const active = settled.find((item) => item.id === this.catscoTopic);
+      if (!this.sending && this.status === 'running' && active && active.working === false) {
+        this.status = 'idle';
+        this.emit({ type: 'status', state: 'idle', message: 'cloud' });
+      }
+      this.emitCatsCoList(
+        this.catscoBots,
+        this.catscoProjects,
+        conversations,
+        this.catscoTopic,
+        this.error,
+      );
+    } catch {
+      // Keep the last known list; a Dashboard blip must not empty the panel.
+    }
+  }
+
+  /** Decide whether the pane needs this history at all.
+   *
+   * Refresh is meant to be cheap: same conversation, same last message, so the
+   * client keeps what it has and nothing re-renders.
+   */
+  private historyForEmit(topic: string, rows: StoredCatsCoMessage[]): AgentHistoryItem[] | undefined {
+    const sig = `${rows.length}:${rows.length ? rows[rows.length - 1]!.id : 0}`;
+    if (topic === this.catscoEmitTopic && sig === this.catscoEmitSig) return undefined;
+    this.catscoEmitTopic = topic;
+    this.catscoEmitSig = sig;
+    return rows.map(toHistoryItem);
+  }
+
+  /** A turn whose closing text already landed is not running any more. */
+  private settleTurn(conversations: CatsCoConversation[]): CatsCoConversation[] {
+    if (!this.catscoFinalSeq || !this.catscoTopic) return conversations;
+    return conversations.map((item) => (
+      item.id === this.catscoTopic
+        && Number(item.latestSeq || 0) >= this.catscoFinalSeq
+        && item.working
+        ? { ...item, working: false, statusText: '任务已完成' }
+        : item
+    ));
+  }
+
+  private emitCatsCoList(
+    bots: CatsCoBot[],
+    projects: Array<{ id: number; name: string }>,
+    conversations: CatsCoConversation[],
+    topicId: string,
+    listError?: string,
+  ): void {
+    const settled = this.settleTurn(conversations);
+    this.emit({
+      type: 'catsco_list',
+      bots: bots.map((bot) => ({ uid: bot.uid, name: bot.name, isCurrent: bot.isCurrent })),
+      projects,
+      conversations: settled,
+      topicId: topicId || undefined,
+      userUid: this.catscoUserUid || undefined,
+      ready: Boolean(topicId),
+      error: listError || this.error,
+    });
+  }
+
+  private stillCatsCo(gen?: number): boolean {
+    if (this.backend !== 'catsco') return false;
+    if (gen !== undefined && this.runGen !== gen) return false;
+    return true;
+  }
+
+  private async enterCatsCo(includeHistory: boolean, gen = this.runGen): Promise<void> {
+    if (!this.stillCatsCo(gen)) return;
+    const target = await resolveCatsCoChatTarget();
+    if (!this.stillCatsCo(gen)) return;
+    this.catscoUserUid = target.userUid || this.catscoUserUid;
+    // Do not emit an empty list first — the UI treats undefined as Loading and an
+    // empty emit looks like "No bots / No projects" and can trigger refresh loops.
+
+    const settled = await Promise.allSettled([
+      listCatsCoBots(),
+      listCatsCoProjects(),
+      listCatsCoConversations(),
+    ]);
+    if (!this.stillCatsCo(gen)) return;
+    const bots = settled[0].status === 'fulfilled' ? settled[0].value : [] as CatsCoBot[];
+    const projects = settled[1].status === 'fulfilled' ? settled[1].value : [] as Array<{ id: number; name: string }>;
+    const conversations = settled[2].status === 'fulfilled' ? settled[2].value : [] as CatsCoConversation[];
+    this.catscoBots = bots;
+    this.catscoProjects = projects;
+    const listFails = settled
+      .map((item, i) => {
+        if (item.status !== 'rejected') return '';
+        const label = i === 0 ? 'bots' : i === 1 ? 'projects' : 'conversations';
+        const reason = item.reason instanceof Error ? item.reason.message : String(item.reason);
+        return `${label}: ${reason}`;
+      })
+      .filter(Boolean);
+    const listError = listFails.length
+      ? `CatsCo list failed (${listFails.join('; ')}). Is Dashboard on ${config.catscoDashboardUrl}?`
+      : undefined;
+
+    const known = new Set(conversations.map((item) => item.id));
+    const saved = this.catscoTopic && known.has(this.catscoTopic) ? this.catscoTopic : '';
+    const topicId = saved
+      || (target.topicId && (known.size === 0 || known.has(target.topicId)) ? target.topicId : '')
+      || conversations[0]?.id
+      || '';
+    if (!target.ready && !topicId) {
+      if (!this.stillCatsCo(gen)) return;
+      this.error = target.reason || listError || 'CatsCo cloud chat is not ready';
+      this.model = 'catsco/cloud';
+      this.emitCatsCoList(bots, projects, conversations, '', this.error);
+      this.emitReady(this.resolveCwd(), false, []);
+      this.emit({ type: 'backend', backend: 'catsco', model: this.model, error: this.error });
+      return;
+    }
+    this.error = listError;
+    this.catscoTopic = topicId;
+    if (topicId) writeCatsCoSelection({ topicId });
+    const current = conversations.find((item) => item.id === topicId);
+    this.catscoTitle = current?.title || '';
+    this.catscoSeq = Number(current?.latestSeq || 0);
+    this.model = `catsco/${this.catscoTitle || target.botName || target.botUid || 'cloud'}`;
+    let history: AgentHistoryItem[] | undefined;
+    let catscoRows: StoredCatsCoMessage[] | undefined;
+    if (includeHistory && topicId) {
+      // Show the local copy immediately; the network only fills the gap.
+      const cached = readCatsCoTranscript(topicId);
+      if (cached && cached.messages.length) {
+        const tail = cached.messages[cached.messages.length - 1];
+        this.catscoFinalSeq = tail && tail.role === 'assistant' && tail.text.trim() ? tail.id : 0;
+        catscoRows = cached.messages;
+        // Paint from disk now. Opening used to wait for the network round trips
+        // below even though the conversation was already stored locally.
+        this.emitCatsCoList(bots, projects, conversations, topicId, this.error);
+        this.emitReady(this.resolveCwd(), false, this.historyForEmit(topicId, catscoRows));
+        this.emit({ type: 'backend', backend: 'catsco', model: this.model, error: this.error });
+      }
+      try {
+        const newest = await fetchCatsCoMessages(topicId, this.catscoUserUid, 1);
+        if (!this.stillCatsCo(gen)) return;
+        const newestId = Number(newest[newest.length - 1]?.id || 0);
+        if (!cached || (newestId && newestId !== cached.lastId)) {
+          const window = await fetchCatsCoMessages(topicId, this.catscoUserUid, 60);
+          if (!this.stillCatsCo(gen)) return;
+          const rows: StoredCatsCoMessage[] = window
+            .filter((m) => m.role === 'user' || m.role === 'assistant' || m.role === 'tool')
+            .map(toStoredRow)
+            .filter((m) => Number.isFinite(m.id) && m.id > 0);
+          const merged = mergeCatsCoTranscript(topicId, rows);
+          const tail = merged.messages[merged.messages.length - 1];
+          this.catscoFinalSeq = tail && tail.role === 'assistant' && tail.text.trim() ? tail.id : 0;
+          catscoRows = merged.messages;
+        }
+      } catch (err) {
+        if (!this.stillCatsCo(gen)) return;
+        const msg = err instanceof Error ? err.message : String(err);
+        this.error = this.error ? `${this.error}; history: ${msg}` : msg;
+        // Keep whatever is on screen: an empty array here blanked the window.
+        history = undefined;
+      }
+      if (catscoRows) history = this.historyForEmit(topicId, catscoRows);
+    }
+    if (!this.stillCatsCo(gen)) return;
+    this.emitCatsCoList(bots, projects, conversations, topicId, listError);
+    this.emitReady(this.resolveCwd(), false, history);
+    this.emit({ type: 'backend', backend: 'catsco', model: this.model, error: this.error });
+    // Don't clobber Working… if a CatsCo poll is mid-flight (list refresh).
+    if (!this.sending) this.emit({ type: 'status', state: 'idle', message: 'backend' });
+    this.startCatsCoListPoller();
+  }
+
+  /** Left list: open another conversation (p2p chat, group, or agent task). */
+  async selectCatsCoTopic(topicId: string): Promise<void> {
+    const id = topicId.trim();
+    if (!id || this.backend !== 'catsco') return;
+    this.runGen += 1;
+    this.sending = false;
+    this.status = 'idle';
+    this.catscoTopic = id;
+    writeCatsCoSelection({ topicId: id });
+    await this.enterCatsCo(true);
+  }
+
+  async refreshCatsCo(): Promise<void> {
+    if (this.backend !== 'catsco') return;
+    await this.enterCatsCo(true);
+  }
+
+  async createCatsCoProject(name: string): Promise<void> {
+    const clean = name.trim();
+    if (!clean) return;
+    try {
+      await createProjectApi(clean);
+      await this.enterCatsCo(false);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      this.emit({ type: 'error', message });
+    }
+  }
+
+  async createCatsCoTask(name: string, projectId?: number): Promise<void> {
+    const clean = name.trim();
+    if (!clean) return;
+    try {
+      const created = await createTaskApi({ name: clean, projectId });
+      this.catscoTopic = created.topicId;
+      writeCatsCoSelection({ topicId: created.topicId });
+      await this.enterCatsCo(true);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      this.emit({ type: 'error', message });
+    }
+  }
+
+  async switchCatsCoBot(botUid: string): Promise<void> {
+    const uid = botUid.trim();
+    if (!uid) return;
+    try {
+      const result = await switchBotApi(uid);
+      this.catscoTopic = result.topicId || '';
+      if (this.catscoTopic) writeCatsCoSelection({ topicId: this.catscoTopic });
+      await this.enterCatsCo(true);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      this.emit({ type: 'error', message });
     }
   }
 
@@ -764,7 +1337,7 @@ export class AgentHost {
     this.attachSessionPrompt(loaded, bundle, adapter);
     if (restore) bundle.session.restoreFromStore?.();
     if (bundle.profile.skills.enabled) {
-      await adapter.loadSkills();
+      await loaded.RuntimeFactory.loadSkills(bundle.services.skillManager);
     }
     this.applyModel(bundle.services.aiService.getConfig());
     this.bundle = bundle;
@@ -773,6 +1346,10 @@ export class AgentHost {
   async send(text: string): Promise<void> {
     const message = text.trim();
     if (!message) return;
+    if (this.backend === 'catsco') {
+      await this.sendCatsCo(message);
+      return;
+    }
     const gen = this.runGen;
     const sid = this.sessionId;
     if (isHelperSession(sid)) this.helperLastUser = message;
@@ -781,6 +1358,7 @@ export class AgentHost {
       return;
     }
     this.sending = true;
+    const sendToken = ++this.sendSeq;
     this.status = 'running';
     let cwd = this.cwd;
     // Flush each spoken segment before the next tool so the history file keeps
@@ -813,7 +1391,8 @@ export class AgentHost {
       this.emit({ type: 'user', text: message });
       this.emit({ type: 'status', state: 'running' });
       this.emitSessions();
-      await this.tracker.captureGitBaseline(cwd);
+      // Baseline for files no tool hook describes (shell edits, scripts).
+      await this.turnSnapshot.capture(cwd);
       const fileTools = new Set(['write_file', 'edit_file']);
       let lastWrite: string | null = null;
       // All assistant text already shown this turn (survives tool flushes). Used so
@@ -920,9 +1499,8 @@ export class AgentHost {
         this.status = 'idle';
         this.emit({ type: 'status', state: 'idle' });
       }
-      await this.tracker.harvestGitExtras(cwd);
       if (!mine()) return;
-      this.emitChanges(this.tracker.list().map((item) => item.path));
+      await this.applyTurnChanges();
       this.emitSessions();
     } catch (err) {
       flushAssistant();
@@ -931,21 +1509,142 @@ export class AgentHost {
       this.status = 'error';
       this.emit({ type: 'error', message: messageText });
       this.emit({ type: 'status', state: 'error', message: messageText });
-      try {
-        const extras = await this.tracker.harvestGitExtras(cwd);
-        if (this.isCurrentRun(gen, sid)) this.emitChanges(extras);
-      } catch {
-        // ignore
-      }
+      if (this.isCurrentRun(gen, sid)) await this.applyTurnChanges();
     } finally {
       flushAssistant();
-      if (this.runGen === gen) {
+      // Release the lock for the newest send only. A turn abandoned by a session
+      // switch must not leave `sending` stuck, which used to block Send and hide
+      // Stop for every session afterwards.
+      if (this.sendSeq === sendToken) {
         this.sending = false;
-        if (this.status === 'running') {
+        if (this.runGen === gen && this.status === 'running') {
           this.status = 'idle';
           this.emit({ type: 'status', state: 'idle' });
         }
       }
+    }
+  }
+
+  private async sendCatsCo(message: string): Promise<void> {
+    const gen = this.runGen;
+    if (this.sending) {
+      this.emit({ type: 'error', message: 'Agent is already running.' });
+      return;
+    }
+    this.sending = true;
+    const sendToken = ++this.sendSeq;
+    this.status = 'running';
+    const mine = () => this.runGen === gen && this.backend === 'catsco';
+    try {
+      const target = await resolveCatsCoChatTarget();
+      if (!mine()) return;
+      if (!target.ready) {
+        this.error = target.reason || 'CatsCo cloud chat is not ready';
+        this.emit({ type: 'error', message: this.error });
+        this.status = 'error';
+        this.emit({ type: 'status', state: 'error', message: this.error });
+        return;
+      }
+      const topicId = this.catscoTopic || target.topicId;
+      if (!topicId) {
+        this.error = target.reason || 'No CatsCo conversation selected';
+        this.emit({ type: 'error', message: this.error });
+        this.status = 'error';
+        this.emit({ type: 'status', state: 'error', message: this.error });
+        return;
+      }
+      this.catscoTopic = topicId;
+      this.catscoUserUid = target.userUid || this.catscoUserUid;
+      // Tool events cover hook-described writes; this covers everything else.
+      const trackCwd = this.uiCwd || this.resolveCwd();
+      await this.turnSnapshot.capture(trackCwd);
+      this.model = `catsco/${this.catscoTitle || target.botName || target.botUid}`;
+      this.error = undefined;
+      this.emit({ type: 'user', text: message });
+      this.emit({ type: 'status', state: 'running' });
+      const sent = await sendCatsCoMessage(topicId, message);
+      if (!mine()) return;
+      const userUid = Number(this.catscoUserUid) || 0;
+      let lastId = sent.id;
+      const emittedTools = new Set<number>();
+      // After a step the bot goes quiet while it composes the answer; ending on
+      // quiet alone cut the turn off before that answer arrived.
+      let awaitingAnswer = false;
+      let quietSince = Date.now();
+      let sawBot = false;
+      const started = Date.now();
+      const QUIET_MS = 3_000;
+      // A step can be left without a result row; never wait on it forever.
+      const STALE_MS = 90_000;
+      const MAX_MS = 12 * 60_000;
+      let polls = 0;
+      while (mine() && Date.now() - started < MAX_MS) {
+        if (polls > 0) await sleep(700);
+        polls += 1;
+        if (!mine()) return;
+        let msgs;
+        try {
+          msgs = await fetchCatsCoMessages(topicId, this.catscoUserUid, 40);
+        } catch (err) {
+          if (!mine()) return;
+          const text = err instanceof Error ? err.message : String(err);
+          this.emit({ type: 'error', message: text });
+          break;
+        }
+        for (const msg of msgs) {
+          if (msg.fromUid === userUid || msg.role === 'user') continue;
+          // A step lands as tool_use (name, no output) and later tool_result under
+          // the same id. Start it once, then fill in the output — never as two rows
+          // and never as plain chat text.
+          if (msg.role === 'tool') {
+            awaitingAnswer = true;
+            const stepId = `catsco-${msg.id}`;
+            const hasOutput = Boolean(msg.text.trim());
+            if (!hasOutput && msg.id <= lastId) continue;
+            if (hasOutput && emittedTools.has(msg.id)) continue;
+            lastId = Math.max(lastId, msg.id);
+            this.emit({ type: 'tool_start', name: msg.name || 'tool', id: stepId });
+            if (hasOutput) {
+              emittedTools.add(msg.id);
+              this.emit({ type: 'tool_end', name: msg.name || 'tool', id: stepId, ok: true, result: msg.text });
+            }
+            sawBot = true;
+            quietSince = Date.now();
+            continue;
+          }
+          if (msg.id <= lastId) continue;
+          lastId = msg.id;
+          this.emit({ type: 'text', text: msg.text.endsWith('\n') ? msg.text : `${msg.text}\n` });
+          awaitingAnswer = false;
+          sawBot = true;
+          quietSince = Date.now();
+        }
+        const quietFor = Date.now() - quietSince;
+        if (sawBot && quietFor >= QUIET_MS && (!awaitingAnswer || quietFor >= STALE_MS)) break;
+      }
+      if (!mine()) return;
+      await this.applyTurnChanges();
+      await this.harvestCatsCoChanges();
+      this.status = 'idle';
+      this.emit({ type: 'status', state: 'idle' });
+    } catch (err) {
+      if (!mine()) return;
+      await this.harvestCatsCoChanges().catch(() => undefined);
+      const messageText = err instanceof Error ? err.message : String(err);
+      this.status = 'error';
+      this.emit({ type: 'error', message: messageText });
+      this.emit({ type: 'status', state: 'error', message: messageText });
+    } finally {
+      if (this.sendSeq === sendToken) {
+        this.sending = false;
+        if (this.runGen === gen && this.status === 'running') {
+          this.status = 'idle';
+          this.emit({ type: 'status', state: 'idle' });
+        }
+      }
+      // The turn is over: fold it into the local copy and emit only the new
+      // rows, so what you typed is followed by whatever the agent added.
+      await this.syncCatsCoTranscript().catch(() => undefined);
     }
   }
 
@@ -957,6 +1656,22 @@ export class AgentHost {
     this.runGen += 1;
     this.sending = false;
     this.status = 'idle';
+    // CatsCo text arrives as cloud messages. A local notice would inject a line the
+    // cloud never saw, and interrupting the (local) bundle wiped the session that
+    // is still on screen — that is how Stop emptied the window.
+    if (this.backend === 'catsco') {
+      const topic = this.catscoTopic;
+      this.emit({ type: 'status', state: 'idle', message: 'stopped' });
+      // The run lives in the cloud, so Stop has to reach it: the connector treats
+      // a stream_cancel message as the web app's stop button.
+      if (live && topic) {
+        void cancelCatsCoRun(topic).then((ok) => {
+          if (!ok) this.emit({ type: 'error', message: 'Could not reach CatsCo to cancel this run.' });
+          void this.pollCatsCoState();
+        }).catch(() => undefined);
+      }
+      return;
+    }
     this.bundle?.session.requestInterrupt();
     if (live) {
       const notice = '已停止当前请求。';
@@ -1007,7 +1722,13 @@ export class AgentHost {
       this.emit({ type: 'error', message: 'Unknown session.' });
       return;
     }
-    if (id === this.sessionId) return;
+    if (id === this.sessionId) {
+      // Clicking the tab that is already active must still reload it. Returning
+      // early left an empty pane, and only going to another tab and back fixed it.
+      await this.ensureSession(this.resolveCwd());
+      this.emitReady();
+      return;
+    }
     await this.switchTo(id, true);
     this.emit({ type: 'status', state: 'idle', message: 'open' });
   }
@@ -1056,6 +1777,10 @@ export class AgentHost {
   }
 
   clear(): void {
+    if (this.backend === 'catsco') {
+      void this.enterCatsCo(true);
+      return;
+    }
     if (isHelperSession(this.sessionId)) this.helperLastUser = '';
     this.forgetToolPrints(this.sessionId);
     unlinkDisplayHistory(this.sessionId);

@@ -3,7 +3,6 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
-import { simpleGit } from 'simple-git';
 import type { AgentChange, AgentChangeKind } from '@remotepad/shared';
 import { config } from '../config.ts';
 
@@ -22,10 +21,22 @@ type Entry = {
   diff: string;
 };
 
+/**
+ * Buffer-level change tracking, one tracker per session.
+ *
+ * Only files a tool actually wrote are tracked. Git is not consulted: a dirty
+ * file in the repo may come from another session, from you, or from something
+ * unrelated, and reporting it here made every session look responsible for all
+ * of them.
+ *
+ * Accepting moves the baseline to the current content, so an accepted change
+ * leaves the list and stays gone until the file is written again. That is the
+ * same model an agent IDE uses: the buffer you have is the reference.
+ */
 export class ChangeTracker {
   private entries = new Map<string, Entry>();
-  private gitBaseline = new Map<string, Snap>();
-  private gitRepo: string | null = null;
+  /** Content the user already accepted; the reference for the next write. */
+  private accepted = new Map<string, Snap>();
 
   list(): AgentChange[] {
     this.dropIgnored();
@@ -60,11 +71,27 @@ export class ChangeTracker {
     return abs;
   }
 
+  /** Reference content for a file about to be written: accepted state, else disk. */
   async snapshotBeforeWrite(filePath: string): Promise<void> {
     const abs = path.resolve(filePath);
     if (isRuntimePath(abs) || this.entries.has(abs)) return;
-    const original = await readSnap(abs);
+    const original = this.accepted.get(abs) ?? await readSnap(abs);
     this.entries.set(abs, { original, current: original, diff: '' });
+  }
+
+  /** Record a change whose "before" came from a turn snapshot, not a write hook. */
+  async trackWithOriginal(filePath: string, before: string | null): Promise<boolean> {
+    const abs = path.resolve(filePath);
+    if (isRuntimePath(abs)) return false;
+    // A hook already captured the real pre-write content: keep that baseline.
+    if (this.entries.has(abs)) return this.refresh(abs);
+    const original: Snap = before === null
+      ? { missing: true, binary: false, text: null, buf: null }
+      : { missing: false, binary: false, text: before, buf: Buffer.from(before) };
+    const current = await readSnap(abs);
+    if (snapsEqual(original, current)) return false;
+    this.entries.set(abs, { original, current, diff: '' });
+    return this.refresh(abs);
   }
 
   async refresh(filePath: string): Promise<boolean> {
@@ -74,8 +101,10 @@ export class ChangeTracker {
       return existed;
     }
     const existing = this.entries.get(abs);
-    const original = existing?.original ?? await readSnap(abs);
+    if (!existing && !this.accepted.has(abs)) return false;
+    const original = existing?.original ?? this.accepted.get(abs)!;
     const current = await readSnap(abs);
+    // Back to the reference (accepted or never written): nothing to report.
     if (snapsEqual(original, current)) {
       this.entries.delete(abs);
       return Boolean(existing);
@@ -89,66 +118,10 @@ export class ChangeTracker {
     return true;
   }
 
-  async captureGitBaseline(cwd: string): Promise<void> {
-    this.gitBaseline.clear();
-    this.gitRepo = await findRepoRoot(cwd);
-    if (!this.gitRepo) return;
-    try {
-      const git = simpleGit(this.gitRepo);
-      const status = await git.status();
-      const ignored = await gitIgnoredRels(this.gitRepo, status.files.map((file) => file.path));
-      for (const file of status.files) {
-        if (ignored.has(file.path)) continue;
-        const abs = path.join(this.gitRepo, file.path);
-        if (isRuntimePath(abs)) continue;
-        this.gitBaseline.set(abs, await readSnap(abs));
-      }
-    } catch {
-      this.gitRepo = null;
-      this.gitBaseline.clear();
-    }
-  }
-
-  async harvestGitExtras(cwd: string): Promise<string[]> {
-    const repo = this.gitRepo || await findRepoRoot(cwd);
-    if (!repo) return [];
-    const touched: string[] = [];
-    try {
-      const git = simpleGit(repo);
-      const status = await git.status();
-      const ignored = await gitIgnoredRels(repo, status.files.map((file) => file.path));
-      const seen = new Set<string>();
-      for (const file of status.files) {
-        if (ignored.has(file.path)) continue;
-        const abs = path.join(repo, file.path);
-        if (isRuntimePath(abs)) continue;
-        seen.add(abs);
-        if (this.entries.has(abs)) {
-          if (await this.refresh(abs)) touched.push(abs);
-          continue;
-        }
-        const current = await readSnap(abs);
-        let original = this.gitBaseline.get(abs);
-        if (!original) original = await readHeadSnap(git, file.path, current);
-        if (snapsEqual(original, current)) continue;
-        this.entries.set(abs, { original, current, diff: '' });
-        if (await this.refresh(abs)) touched.push(abs);
-      }
-      for (const [abs, original] of this.gitBaseline) {
-        if (seen.has(abs) || this.entries.has(abs)) continue;
-        const current = await readSnap(abs);
-        if (snapsEqual(original, current)) continue;
-        this.entries.set(abs, { original, current, diff: '' });
-        if (await this.refresh(abs)) touched.push(abs);
-      }
-    } catch {
-      // ignore git harvest failures
-    }
-    return [...new Set(touched)];
-  }
-
   async accept(filePath: string): Promise<string[]> {
     const abs = path.resolve(filePath);
+    const entry = this.entries.get(abs);
+    if (entry) this.accepted.set(abs, entry.current);
     this.entries.delete(abs);
     return [abs];
   }
@@ -169,6 +142,7 @@ export class ChangeTracker {
   async acceptAll(): Promise<string[]> {
     this.dropIgnored();
     const paths = [...this.entries.keys()];
+    for (const [abs, entry] of this.entries) this.accepted.set(abs, entry.current);
     this.entries.clear();
     return paths;
   }
@@ -201,24 +175,6 @@ function isInside(root: string, filePath: string): boolean {
   return rel === '' || (rel !== '..' && !rel.startsWith(`..${path.sep}`) && !path.isAbsolute(rel));
 }
 
-async function gitIgnoredRels(repo: string, rels: string[]): Promise<Set<string>> {
-  const ignored = new Set<string>();
-  const unique = [...new Set(rels.filter(Boolean))];
-  if (unique.length === 0) return ignored;
-  try {
-    const { stdout } = await execFileAsync('git', ['-C', repo, 'check-ignore', '--no-index', '-z', '--', ...unique], {
-      maxBuffer: 4 * 1024 * 1024,
-    });
-    for (const item of stdout.split('\0')) if (item) ignored.add(item);
-  } catch (err) {
-    const execErr = err as { code?: number; stdout?: string };
-    if (typeof execErr.stdout === 'string') {
-      for (const item of execErr.stdout.split('\0')) if (item) ignored.add(item);
-    }
-  }
-  return ignored;
-}
-
 function isRuntimePath(filePath: string): boolean {
   const abs = path.resolve(filePath);
   const roots = [
@@ -236,22 +192,6 @@ function isRuntimePath(filePath: string): boolean {
   return false;
 }
 
-async function findRepoRoot(start: string): Promise<string | null> {
-  let current = path.resolve(start);
-  while (true) {
-    try {
-      const gitDir = path.join(current, '.git');
-      const stat = await fs.lstat(gitDir);
-      if (stat.isDirectory() || stat.isFile()) return current;
-    } catch {
-      // continue
-    }
-    const parent = path.dirname(current);
-    if (parent === current) return null;
-    current = parent;
-  }
-}
-
 async function readSnap(filePath: string): Promise<Snap> {
   try {
     const stat = await fs.lstat(filePath);
@@ -263,20 +203,6 @@ async function readSnap(filePath: string): Promise<Snap> {
     if (buf.includes(0)) return { missing: false, binary: true, text: null, buf };
     return { missing: false, binary: false, text: buf.toString('utf8'), buf };
   } catch {
-    return { missing: true, binary: false, text: null, buf: null };
-  }
-}
-
-async function readHeadSnap(
-  git: ReturnType<typeof simpleGit>,
-  rel: string,
-  current: Snap,
-): Promise<Snap> {
-  try {
-    const text = await git.show([`HEAD:${rel}`]);
-    return { missing: false, binary: false, text, buf: Buffer.from(text) };
-  } catch {
-    if (current.missing) return current;
     return { missing: true, binary: false, text: null, buf: null };
   }
 }

@@ -211,6 +211,9 @@ export interface AgentChange {
 
 export type AgentStatus = 'idle' | 'running' | 'error';
 
+/** Local XiaoBa embed vs CatsCo cloud employee (via Dashboard connector). */
+export type AgentBackend = 'local' | 'catsco';
+
 export interface AgentHistoryItem {
   role: 'user' | 'assistant' | 'tool';
   text: string;
@@ -225,6 +228,44 @@ export interface AgentSessionInfo {
   pinned?: boolean;
   /** Absolute path to this session's JSONL history file. */
   historyPath?: string;
+}
+
+/** CatsCo cloud account data for the Agent panel's left list. */
+export interface AgentCatsCoBot {
+  uid: string;
+  name: string;
+  isCurrent: boolean;
+}
+
+export interface AgentCatsCoProject {
+  id: number;
+  name: string;
+}
+
+export interface AgentCatsCoConversation {
+  /** CatsCo topic id — `p2p_<user>_<bot>` or `grp_<id>`. */
+  id: string;
+  title: string;
+  preview: string;
+  projectId?: number;
+  projectName?: string;
+  isGroup: boolean;
+  isTask?: boolean;
+  updatedAt?: number;
+  /** Cloud task state: the agent is still working on this conversation. */
+  working?: boolean;
+  /** Cloud-provided progress text, e.g. "正在处理请求". */
+  statusText?: string;
+}
+
+export interface AgentCatsCoList {
+  bots: AgentCatsCoBot[];
+  projects: AgentCatsCoProject[];
+  conversations: AgentCatsCoConversation[];
+  topicId?: string;
+  userUid?: string;
+  ready?: boolean;
+  error?: string;
 }
 
 /** Legacy Helper session id. New Helpers are `helper-*`. */
@@ -250,6 +291,18 @@ export type AgentClientMessage =
   | { type: 'undo_all' }
   /** Write a line-edited body back for one tracked file (per-line keep/undo). */
   | { type: 'apply'; path: string; content: string }
+  /** Switch Agent dock between local XiaoBa and CatsCo cloud. */
+  | { type: 'set_backend'; backend: AgentBackend }
+  /** CatsCo only: pick another conversation (topic) from the left list. */
+  | { type: 'catsco_select'; topicId: string }
+  /** CatsCo only: reload bots / projects / conversations. */
+  | { type: 'catsco_refresh' }
+  /** CatsCo only: create a project. */
+  | { type: 'catsco_project_create'; name: string }
+  /** CatsCo only: create an agent-task session, optionally inside a project. */
+  | { type: 'catsco_task_create'; name: string; projectId?: number }
+  /** CatsCo only: switch the bound cloud employee. */
+  | { type: 'catsco_bot_switch'; botUid: string }
   /** Helper only: commit worktree + push helper/* branch to origin. */
   | { type: 'publish' }
   /** Helper only: start/refresh the worktree preview instance (port 2027). */
@@ -267,8 +320,12 @@ export type AgentServerMessage =
     history?: AgentHistoryItem[];
     sessions?: AgentSessionInfo[];
     changes: AgentChange[];
+    backend?: AgentBackend;
   }
+  | { type: 'backend'; backend: AgentBackend; model?: string; error?: string }
   | { type: 'sessions'; sessions: AgentSessionInfo[] }
+  /** CatsCo left list: bots, projects and every conversation the account can see. */
+  | ({ type: 'catsco_list' } & AgentCatsCoList)
   | { type: 'user'; text: string; sessionId?: string }
   | { type: 'text'; text: string; sessionId?: string }
   | { type: 'tool_start'; name: string; id?: string; input?: unknown; sessionId?: string }
@@ -310,3 +367,8 @@ export {
   type LlmSettingsPut,
   type LlmSettingsView,
 } from './llm.ts';
+
+export {
+  type CatsCoLinkState,
+  type CatsCoStatusView,
+} from './catsco.ts';

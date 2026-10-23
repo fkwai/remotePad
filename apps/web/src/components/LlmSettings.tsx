@@ -107,7 +107,7 @@ export function LlmSettings() {
           onChange={(event) => setApiKey(event.target.value)}
         />
       </label>
-      <div className="kv">Stored in ~/.remotepad/llm.json. Leave the key blank to keep the saved one.</div>
+      <div className="kv">Stored in ~/.remotepad/llm.json. Leave the key blank to keep the saved one. DeepSeek is called with the OpenAI Chat Completions API (not a native DeepSeek SDK).</div>
       <button type="button" className="llm-save" disabled={busy} onClick={() => void save()}>
         {busy ? 'Saving…' : 'Save model'}
       </button>

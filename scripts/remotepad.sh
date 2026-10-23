@@ -54,6 +54,12 @@ ui_url() {
   fi
 }
 
+# Pids holding this instance's ports, so `down` can prove it really stopped.
+listeners() {
+  command -v ss >/dev/null 2>&1 || return 0
+  ss -ltnp 2>/dev/null | grep -E ":(5173|3847)\b" | grep -o 'pid=[0-9]*' | cut -d= -f2 | sort -u | tr '\n' ' '
+}
+
 cmd_dev() {
   if [[ "$MODE" == prod ]]; then
     exec pnpm start
@@ -76,10 +82,13 @@ cmd_up() {
     rm -f "$PIDFILE"
   fi
   echo "Starting RemotePad ($MODE) — log: $LOGFILE"
+  # setsid makes the wrapper a process-group leader, so `down` can stop the
+  # whole tree. Killing only the pnpm pid used to leave vite and tsx running,
+  # which then blocked the next start with "Port 5173 is already in use".
   if [[ "$MODE" == prod ]]; then
-    nohup pnpm start >>"$LOGFILE" 2>&1 &
+    nohup setsid pnpm start >>"$LOGFILE" 2>&1 &
   else
-    nohup pnpm dev >>"$LOGFILE" 2>&1 &
+    nohup setsid pnpm dev >>"$LOGFILE" 2>&1 &
   fi
   echo $! >"$PIDFILE"
   for _ in $(seq 1 40); do
@@ -105,12 +114,22 @@ cmd_down() {
     return 0
   fi
   if kill -0 "$pid" 2>/dev/null; then
-    kill "$pid" 2>/dev/null || true
-    sleep 0.5
-    kill -9 "$pid" 2>/dev/null || true
+    # Whole group first: the wrapper exits before its children finish work.
+    kill -TERM -- "-$pid" 2>/dev/null || kill "$pid" 2>/dev/null || true
+    for _ in $(seq 1 20); do
+      kill -0 "$pid" 2>/dev/null || break
+      sleep 0.25
+    done
+    kill -KILL -- "-$pid" 2>/dev/null || kill -9 "$pid" 2>/dev/null || true
     echo "Stopped pid $pid"
   else
     echo "Process $pid not running"
+  fi
+  # Report anything the group kill could not reach.
+  leftover="$(listeners)"
+  if [[ -n "$leftover" ]]; then
+    echo "Still listening: $leftover" >&2
+    return 1
   fi
 }
 

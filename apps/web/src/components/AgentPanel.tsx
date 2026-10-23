@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { AgentChange, AgentSessionInfo, AgentStatus } from '@remotepad/shared';
+import type { AgentBackend, AgentCatsCoConversation, AgentCatsCoList, AgentChange, AgentSessionInfo, AgentStatus } from '@remotepad/shared';
 import { isHelperSessionId } from '@remotepad/shared';
 import { basename } from '../files';
 import { readEntryDrag, hasEntryDrag } from '../dnd';
@@ -20,10 +20,12 @@ export function AgentPanel({
   sessionId,
   sessions,
   state,
+  backend,
   messages,
   changes,
   onSend,
   onStop,
+  onSetBackend,
   onClear,
   onNew,
   onOpen,
@@ -35,19 +37,26 @@ export function AgentPanel({
   onUndoAll,
   onOpenDiff,
   onOpenSessionFile,
-  onPublish,
-  onPreview,
-  onMerge,
+  catscoList,
+  onCatsCoSelect,
+  onCatsCoRefresh,
+  onCatsCoCreateProject,
+  onCatsCoCreateTask,
+  onCatsCoSwitchBot,
+  onCatsCoCloseActive,
+  switching,
 }: {
   cwd: string;
   error?: string;
   sessionId?: string;
   sessions: AgentSessionInfo[];
   state: AgentStatus;
+  backend: AgentBackend;
   messages: AgentChatMessage[];
   changes: AgentChange[];
   onSend: (text: string) => void;
   onStop: () => void;
+  onSetBackend: (backend: AgentBackend) => void;
   onClear: () => void;
   onNew: () => void;
   onOpen: (id: string) => void;
@@ -59,12 +68,17 @@ export function AgentPanel({
   onUndoAll: () => void;
   onOpenDiff: (change: AgentChange) => void;
   onOpenSessionFile?: (path: string) => void;
-  /** Helper only: commit worktree + push to origin. */
-  onPublish?: () => void;
-  /** Helper only: start the worktree preview instance on the preview ports. */
-  onPreview?: () => void;
-  /** Helper only: merge the worktree into main, delete it, stop the preview. */
-  onMerge?: () => void;
+  /** CatsCo only: bots / projects / conversations shown in the left list. */
+  catscoList?: AgentCatsCoList;
+  onCatsCoSelect?: (topicId: string) => void;
+  onCatsCoRefresh?: () => void;
+  onCatsCoCreateProject?: (name: string) => void;
+  onCatsCoCreateTask?: (name: string, projectId?: number) => void;
+  onCatsCoSwitchBot?: (botUid: string) => void;
+  /** CatsCo only: every conversation tab was closed, so clear the pane. */
+  onCatsCoCloseActive?: () => void;
+  /** A session/backend switch is in flight; sending now would hit the old session. */
+  switching?: boolean;
 }) {
   const logRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -74,47 +88,124 @@ export function AgentPanel({
   const [renameValue, setRenameValue] = useState('');
   const [historyOpen, setHistoryOpen] = useState(false);
   const [openIds, setOpenIds] = useState<string[]>([]);
+  /** CatsCo conversations open as tabs (the server only tracks one active topic). */
+  const [catscoTabs, setCatscoTabs] = useState<string[]>([]);
+  /** True after the reader closes the last CatsCo tab: stay closed until they pick one. */
+  const catscoClosedAll = useRef(false);
+  /** Stick to the newest message until the reader scrolls up. Starts true so the
+   *  first history load (local or CatsCo) lands at the bottom, not at the top. */
+  const stick = useRef(true);
   const [chips, setChips] = useState<Record<string, { path: string; name: string }[]>>({});
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [tabMenu, setTabMenu] = useState<{ x: number; y: number; id: string } | null>(null);
   const [sessionMenu, setSessionMenu] = useState<{ x: number; y: number; id: string } | null>(null);
   const [openTools, setOpenTools] = useState<Set<number>>(new Set());
+  /** Collapsed step groups: a tool run shows one line until the reader expands it. */
+  const [openSteps, setOpenSteps] = useState<Set<string>>(new Set());
   const [showJump, setShowJump] = useState(false);
-  const [publishing, setPublishing] = useState(false);
-  const [previewing, setPreviewing] = useState(false);
-  const [merging, setMerging] = useState(false);
-  const busy = state === 'running';
-  const helperActive = isHelperSessionId(sessionId);
+  const [catscoOpen, setCatscoOpen] = useState(false);
+  const [newProject, setNewProject] = useState('');
+  const [collapsedProjects, setCollapsedProjects] = useState<Set<number>>(new Set());
+  const catsco = backend === 'catsco';
+  /** Cloud task state for the open conversation: starts outside this panel too. */
+  const activeConversation = catsco
+    ? (catscoList?.conversations ?? []).find((item) => item.id === catscoList?.topicId)
+    : undefined;
+  const busy = state === 'running' || Boolean(activeConversation?.working) || Boolean(switching);
   const activeId = sessionId ?? '';
   const activeChips = chips[activeId] ?? [];
   const draft = drafts[activeId] ?? '';
+  const catscoBots = catscoList?.bots ?? [];
+  const catscoProjects = catscoList?.projects ?? [];
+  const catscoBotName = (catscoList?.bots ?? []).find((item) => item.isCurrent)?.name || 'CatsCo';
+  const catscoConversations = useMemo(() => {
+    const list = [...(catscoList?.conversations ?? [])];
+    list.sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0));
+    return list;
+  }, [catscoList]);
+  const catscoByProject = useMemo(() => {
+    const map = new Map<number, AgentCatsCoConversation[]>();
+    for (const item of catscoConversations) {
+      if (!item.projectId) continue;
+      const bucket = map.get(item.projectId) ?? [];
+      bucket.push(item);
+      map.set(item.projectId, bucket);
+    }
+    return map;
+  }, [catscoConversations]);
+  // A conversation whose project is missing from /projects must still show up,
+  // so anything orphaned falls through to the loose chat list instead of vanishing.
+  const catscoLoose = catscoConversations.filter(
+    (item) => !item.projectId || !catscoProjects.some((project) => project.id === item.projectId),
+  );
+
+  useEffect(() => {
+    // Both side panels start closed; the ☰ button opens them on demand.
+    setHistoryOpen(false);
+    setCatscoOpen(false);
+  }, [catsco]);
+
+  // A page that loads while CatsCo is already active can miss the first list
+  // (socket not yet subscribed, or an aborted request). Re-ask a couple of times
+  // instead of leaving the panel on "Loading…" forever.
+  const resetCatsCoRef = useRef(onCatsCoRefresh);
+  resetCatsCoRef.current = onCatsCoRefresh;
+
+  useEffect(() => {
+    if (!catsco || catscoList) return;
+    let tries = 0;
+    const timer = setInterval(() => {
+      tries += 1;
+      resetCatsCoRef.current?.();
+      if (tries >= 3) clearInterval(timer);
+    }, 2500);
+    return () => clearInterval(timer);
+  }, [catsco, catscoList]);
 
   useEffect(() => {
     const node = logRef.current;
     if (!node) return;
-    const nearBottom = node.scrollHeight - node.scrollTop - node.clientHeight < 80;
-    if (nearBottom || pinBottom.current) {
-      node.scrollTop = node.scrollHeight;
-      pinBottom.current = false;
-    }
     const away = node.scrollHeight - node.scrollTop - node.clientHeight;
-    setShowJump(away > node.clientHeight);
+    if (stick.current || pinBottom.current || away < 80) {
+      node.scrollTop = node.scrollHeight;
+      stick.current = true;
+    }
+    pinBottom.current = false;
+    const after = node.scrollHeight - node.scrollTop - node.clientHeight;
+    setShowJump(after > node.clientHeight);
   }, [messages]);
 
   useEffect(() => {
     const node = logRef.current;
     if (!node) return;
+    // Content growth (new turn, streamed text, swapped history) also fires
+    // scroll/Resize events. Treating those as "the reader scrolled up" silently
+    // stopped the pane from following new messages, so only deliberate input
+    // may detach the stick.
+    let gestureAt = 0;
+    const gesture = () => { gestureAt = performance.now(); };
     const onScroll = () => {
       const away = node.scrollHeight - node.scrollTop - node.clientHeight;
+      if (away < 80) stick.current = true;
+      else if (performance.now() - gestureAt < 600) stick.current = false;
       setShowJump(away > node.clientHeight);
     };
-    onScroll();
+    const mo = new MutationObserver(() => {
+      if (stick.current) node.scrollTop = node.scrollHeight;
+      onScroll();
+    });
+    mo.observe(node, { childList: true, subtree: true, characterData: true });
     node.addEventListener('scroll', onScroll, { passive: true });
-    const ro = new ResizeObserver(onScroll);
-    ro.observe(node);
+    node.addEventListener('wheel', gesture, { passive: true });
+    node.addEventListener('touchmove', gesture, { passive: true });
+    node.addEventListener('keydown', gesture);
+    onScroll();
     return () => {
+      mo.disconnect();
       node.removeEventListener('scroll', onScroll);
-      ro.disconnect();
+      node.removeEventListener('wheel', gesture);
+      node.removeEventListener('touchmove', gesture);
+      node.removeEventListener('keydown', gesture);
     };
   }, []);
 
@@ -136,10 +227,26 @@ export function AgentPanel({
     setOpenTools(new Set());
   }, [sessionId]);
 
+  /** Anything that swaps the whole transcript: backend, local session, CatsCo topic. */
+  const transcriptKey = catsco ? `catsco:${catscoList?.topicId ?? ''}` : `local:${sessionId ?? ''}`;
+
   useEffect(() => {
     const node = logRef.current;
-    if (node) node.scrollTop = node.scrollHeight;
-  }, [sessionId]);
+    if (!node) return;
+    stick.current = true;
+    node.scrollTop = node.scrollHeight;
+    setShowJump(false);
+    setOpenSteps(new Set());
+  }, [transcriptKey]);
+
+  // Keep the active CatsCo conversation present as a tab, unless the reader just
+  // closed everything (the server keeps polling the topic, so an unguarded
+  // effect would immediately reopen the tab they closed).
+  useEffect(() => {
+    const active = catscoList?.topicId;
+    if (!catsco || !active || catscoClosedAll.current) return;
+    setCatscoTabs((prev) => (prev.includes(active) ? prev : [...prev, active]));
+  }, [catsco, catscoList?.topicId]);
 
   const openTabs = useMemo(() => {
     const byId = new Map(sessions.map((item) => [item.id, item]));
@@ -154,13 +261,31 @@ export function AgentPanel({
     return tabs;
   }, [openIds, sessions]);
 
+  const catscoTabInfo = useMemo(
+    () => catscoTabs.map((id) => {
+      const found = catscoConversations.find((item) => item.id === id);
+      return { id, title: found?.title || (id === catscoList?.topicId ? 'CatsCo cloud' : id) };
+    }),
+    [catscoTabs, catscoConversations, catscoList?.topicId],
+  );
+
   const visible = useMemo(() => {
     const q = query.trim().toLowerCase();
     if (!q) return sessions;
     return sessions.filter((item) => `${item.title} ${item.preview}`.toLowerCase().includes(q));
   }, [sessions, query]);
 
-  const turns = useMemo(() => groupTurns(messages), [messages]);
+  // No CatsCo tab open = an empty pane, even if the cloud poll still has a topic.
+  const turns = useMemo(
+    () => (catsco && catscoTabs.length === 0 ? [] : groupTurns(messages)),
+    [catsco, catscoTabs, messages],
+  );
+  /** Steps belong to the turn that started after the last user message. */
+  const lastUserIdx = turns.reduce((acc, t, i) => (t.role === 'user' ? i : acc), -1);
+  const lastIsTool = messages.length > 0 && messages[messages.length - 1]!.role === 'tool';
+  /** Hide "… is writing" once the closing assistant message is already on screen. */
+  const lastIsAnswer = messages.length > 0 && messages[messages.length - 1]!.role === 'assistant';
+  const showTyping = busy && !lastIsAnswer;
 
   const allToolIds = useMemo(() => {
     const ids: number[] = [];
@@ -210,6 +335,47 @@ export function AgentPanel({
     setRenaming(null);
   }
 
+  function catscoNewTask(projectId?: number) {
+    const name = window.prompt(projectId ? 'New task name' : 'New CatsCo session name');
+    const clean = name?.trim();
+    if (clean) onCatsCoCreateTask?.(clean, projectId);
+  }
+
+  function toggleProject(id: number) {
+    setCollapsedProjects((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  function renderConversation(item: AgentCatsCoConversation) {
+    return (
+      <div
+        key={item.id}
+        className={`agent-session agent-catsco-session ${item.id === catscoList?.topicId ? 'active' : ''}`}
+        onClick={() => {
+          catscoClosedAll.current = false;
+          setCatscoTabs((prev) => (prev.includes(item.id) ? prev : [...prev, item.id]));
+          onCatsCoSelect?.(item.id);
+          // Same as a local session row: the pick is done, so get out of the way.
+          setCatscoOpen(false);
+        }}
+        title={item.id}
+      >
+        <div className="agent-session-row">
+          <span className="agent-session-title">
+            <span className="agent-session-kind">{item.isGroup ? 'Group' : item.isTask ? 'Task' : 'Chat'}</span>
+            {item.title}
+          </span>
+          <span className="agent-session-time">{item.updatedAt ? formatTime(item.updatedAt) : ''}</span>
+        </div>
+        {item.preview && <div className="agent-session-preview">{item.preview}</div>}
+      </div>
+    );
+  }
+
   function closeTab(id: string) {
     const remaining = openIds.filter((item) => item !== id);
     setOpenIds(remaining);
@@ -221,6 +387,22 @@ export function AgentPanel({
     }
     const fallback = remaining.at(-1);
     if (fallback) onOpen(fallback);
+  }
+
+  /** Close one CatsCo tab; switching away reloads that topic's history from cloud. */
+  function closeCatscoTab(id: string) {
+    const remaining = catscoTabs.filter((item) => item !== id);
+    setCatscoTabs(remaining);
+    if (id !== catscoList?.topicId) return;
+    const next = remaining[remaining.length - 1];
+    if (next) {
+      catscoClosedAll.current = false;
+      onCatsCoSelect?.(next);
+      return;
+    }
+    // Last tab gone: stay empty instead of letting the CatsCo poll reopen it.
+    catscoClosedAll.current = true;
+    onCatsCoCloseActive?.();
   }
 
   function openFromHistory(id: string) {
@@ -247,9 +429,28 @@ export function AgentPanel({
 
   return (
     <div className="agent-pane">
+      <div className="agent-backend">
+        <div className="seg">
+          <button
+            type="button"
+            className={!catsco ? 'active' : ''}
+            onClick={() => onSetBackend('local')}
+            title="Local XiaoBa runtime on this machine"
+          >Local</button>
+          <button
+            type="button"
+            className={catsco ? 'active' : ''}
+            onClick={() => onSetBackend('catsco')}
+            title="CatsCo cloud employee via the desktop connector"
+          >CatsCo</button>
+        </div>
+        <span className="agent-backend-hint">
+          {catsco ? 'Cloud employee · same chat as app.catsco.cc' : 'Local runtime · selected repo'}
+        </span>
+      </div>
       <div className="agent-chrome">
         <div className="agent-tabs">
-          {openTabs.map((item) => (
+          {!catsco && openTabs.map((item) => (
             <div
               key={item.id}
               className={`agent-tab ${item.id === sessionId ? 'active' : ''} ${isHelperSessionId(item.id) ? 'helper' : ''}`}
@@ -267,13 +468,43 @@ export function AgentPanel({
               >×</button>
             </div>
           ))}
+          {catsco && catscoTabInfo.map((item) => (
+            <div
+              key={item.id}
+              className={`agent-tab catsco ${item.id === catscoList?.topicId ? 'active' : ''}`}
+              onClick={() => {
+                if (item.id === catscoList?.topicId) return;
+                catscoClosedAll.current = false;
+                onCatsCoSelect?.(item.id);
+              }}
+              title={item.id}
+            >
+              <span className="agent-tab-title">{item.title}</span>
+              <button
+                className="ghost close"
+                onClick={(e) => { e.stopPropagation(); closeCatscoTab(item.id); }}
+              >×</button>
+            </div>
+          ))}
         </div>
-        <button className="ghost agent-chrome-btn" onClick={onNew} title="New Agent — works in the selected repo" aria-label="New Agent">+</button>
         <button
-          className={`ghost agent-chrome-btn ${historyOpen ? 'on' : ''}`}
-          onClick={() => setHistoryOpen((v) => !v)}
-          title="Session history"
-          aria-label="Session history"
+          className="ghost agent-chrome-btn"
+          onClick={() => {
+            if (catsco) {
+              catscoClosedAll.current = false;
+              catscoNewTask();
+            } else {
+              onNew();
+            }
+          }}
+          title={catsco ? 'New CatsCo session' : 'New Agent — works in the selected repo'}
+          aria-label={catsco ? 'New CatsCo session' : 'New Agent'}
+        >+</button>
+        <button
+          className={`ghost agent-chrome-btn ${(catsco ? catscoOpen : historyOpen) ? 'on' : ''}`}
+          onClick={() => (catsco ? setCatscoOpen((v) => !v) : setHistoryOpen((v) => !v))}
+          title={catsco ? 'Projects & sessions' : 'Session history'}
+          aria-label={catsco ? 'Projects & sessions' : 'Session history'}
         >☰</button>
         {allToolIds.length > 0 && (
           <button
@@ -328,14 +559,14 @@ export function AgentPanel({
       {error && <div className="agent-banner">{error}</div>}
       <div className="agent-log-wrap">
         <div className="agent-log" ref={logRef}>
-          {messages.length === 0 && !error && (
+          {turns.length === 0 && !error && (
             <div className="agent-empty">
-              {helperActive
-                ? `Helper edits one reusable git worktree (not the live install). Cwd: ${cwd || '…'}. Preview 2027 runs that tree as a second window, Commit & push publishes the branch, Merge → main lands it and deletes the tree. Refresh wipes this chat.`
-                : 'Agent — cwd follows the selected repo (or the file-tree root). + starts another session.'}
+              {catsco
+                ? 'CatsCo cloud — messages go to your cloud employee (same chat as app.catsco.cc). History lives on CatsCo; switch Local anytime.'
+                : 'Local Agent — cwd follows the selected repo (or the file-tree root). + starts another session.'}
             </div>
           )}
-        {turns.map((turn) => (
+        {turns.map((turn, iTurn) => (
           <div key={turn.key} className={`agent-turn ${turn.role}`}>
             {turn.role === 'user' && (
               <div className="agent-msg user">
@@ -345,7 +576,7 @@ export function AgentPanel({
             )}
             {turn.role === 'assistant' && (
               <div className="agent-msg assistant">
-                <div className="agent-msg-role">{helperActive ? 'Helper' : 'Agent'}</div>
+                <div className="agent-msg-role">{catsco ? 'CatsCo' : 'Agent'}</div>
                 <div className="agent-msg-body">{turn.text}</div>
               </div>
             )}
@@ -354,41 +585,82 @@ export function AgentPanel({
                 <div className="agent-msg-body">{turn.text}</div>
               </div>
             )}
-            {turn.role === 'tools' && (
-              <div className="agent-tool-block">
-                {turn.tools.map((tool) => {
-                  const open = openTools.has(tool.id);
-                  const print = toolPrint(tool);
-                  return (
-                    <button
-                      type="button"
-                      key={tool.id}
-                      className={`agent-tool-row ${open ? '' : 'collapsed'}`}
-                      onClick={() => {
-                        setOpenTools((prev) => {
-                          const next = new Set(prev);
-                          if (next.has(tool.id)) next.delete(tool.id);
-                          else next.add(tool.id);
-                          return next;
-                        });
-                      }}
-                    >
-                      <span className="agent-tool-chevron">{open ? '▾' : '▸'}</span>
-                      <span className="agent-tool-name">{tool.name || 'tool'}</span>
-                      {!open && print && <span className="agent-tool-hint">{toolPreview(print)}</span>}
-                      {open && (
-                        <span className="agent-tool-detail">
-                          {print || tool.input || 'No output kept in the session file.'}
-                        </span>
-                      )}
-                    </button>
-                  );
-                })}
-              </div>
-            )}
+            {turn.role === 'tools' && (() => {
+              const open = openSteps.has(turn.key);
+              const count = turn.tools.length;
+              const current = turn.tools[count - 1];
+              // Only the group opened by this send is "executing"; the previous
+              // round's count must not carry over into the new turn.
+              const live = busy && iTurn === turns.length - 1 && iTurn > lastUserIdx;
+              return (
+                <div className={`agent-steps ${open ? 'open' : ''}`}>
+                  <button
+                    type="button"
+                    className="agent-steps-head"
+                    onClick={() => {
+                      setOpenSteps((prev) => {
+                        const next = new Set(prev);
+                        if (next.has(turn.key)) next.delete(turn.key);
+                        else next.add(turn.key);
+                        return next;
+                      });
+                    }}
+                    title={open ? 'Hide steps' : 'Show steps'}
+                  >
+                    <span className="agent-tool-chevron">{open ? '▾' : '▸'}</span>
+                    <span className="agent-steps-label">
+                      {live
+                        ? `Executing · step ${count} · ${current?.name || 'tool'}`
+                        : (count === 1 ? '1 step' : `${count} steps`)}
+                    </span>
+                  </button>
+                  {open && (
+                    <div className="agent-tool-block">
+                      {turn.tools.map((tool) => {
+                        const rowOpen = openTools.has(tool.id);
+                        const print = toolPrint(tool);
+                        return (
+                          <button
+                            type="button"
+                            key={tool.id}
+                            className={`agent-tool-row ${rowOpen ? '' : 'collapsed'}`}
+                            onClick={() => {
+                              setOpenTools((prev) => {
+                                const next = new Set(prev);
+                                if (next.has(tool.id)) next.delete(tool.id);
+                                else next.add(tool.id);
+                                return next;
+                              });
+                            }}
+                          >
+                            <span className="agent-tool-chevron">{rowOpen ? '▾' : '▸'}</span>
+                            <span className="agent-tool-name">{tool.name || 'tool'}</span>
+                            {!rowOpen && print && <span className="agent-tool-hint">{toolPreview(print)}</span>}
+                            {rowOpen && (
+                              <span className="agent-tool-detail">
+                                {print || tool.input || 'No output kept in the session file.'}
+                              </span>
+                            )}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
           </div>
         ))}
-        {busy && <div className="agent-busy">Working…</div>}
+        {showTyping && (
+          <div className="agent-typing">
+            <span className="agent-typing-label">
+              {catsco
+                ? `${catscoBotName} is ${lastIsTool ? 'working' : 'writing'}`
+                : (lastIsTool ? 'Agent is working' : 'Agent is writing')}
+            </span>
+            <span className="agent-dots"><i /><i /><i /></span>
+          </div>
+        )}
       </div>
       {showJump && (
         <button type="button" className="agent-jump" onClick={jumpToBottom} title="Jump to bottom" aria-label="Jump to bottom">↓</button>
@@ -474,7 +746,14 @@ export function AgentPanel({
           rows={3}
           value={draft}
           onChange={(e) => setDrafts((prev) => ({ ...prev, [activeId]: e.target.value }))}
-          placeholder={busy ? 'Agent is working… (Enter queues after stop)' : helperActive ? 'Message Helper · drop files as chips' : 'Message XiaoBa · drop files as chips'}
+          disabled={busy}
+          placeholder={
+            switching
+              ? 'Switching session…'
+              : busy
+              ? (catsco ? `${catscoBotName} is working… wait for the answer` : 'Agent is working… (Enter queues after stop)')
+              : catsco ? 'Message CatsCo cloud · drop files as chips' : 'Message local XiaoBa · drop files as chips'
+          }
           onDragOver={(e) => {
             if (hasEntryDrag(e)) e.preventDefault();
           }}
@@ -492,62 +771,108 @@ export function AgentPanel({
           }}
         />
         <div className="agent-compose-row">
+          {!catsco && (
           <button
             className="ghost"
             onClick={() => {
               setChips((prev) => ({ ...prev, [activeId]: [] }));
               onClear();
             }}
-            disabled={busy || publishing}
-            title={helperActive
-              ? 'Wipe Helper chat. Lasting work is already in the worktree / git.'
-              : "Wipe this Agent session's saved history"}
-          >{helperActive ? 'Refresh' : 'Clear'}</button>
-          {helperActive && onPublish && (
-            <button
-              className="ghost"
-              disabled={busy || publishing}
-              title="Commit all worktree changes and push this helper/* branch to origin"
-              onClick={() => {
-                setPublishing(true);
-                onPublish();
-                window.setTimeout(() => setPublishing(false), 2500);
-              }}
-            >{publishing ? 'Pushing…' : 'Commit & push'}</button>
-          )}
-          {helperActive && onPreview && (
-            <button
-              className="ghost"
-              disabled={busy || previewing}
-              title="Run this worktree as its own RemotePad instance on the preview ports (2027) and open the same tabs as this window"
-              onClick={() => {
-                setPreviewing(true);
-                onPreview();
-                window.setTimeout(() => setPreviewing(false), 4000);
-              }}
-            >{previewing ? 'Starting…' : 'Preview 2027'}</button>
-          )}
-          {helperActive && onMerge && (
-            <button
-              className="ghost danger"
-              disabled={busy || merging}
-              title="Merge this worktree branch into main, delete the worktree and stop the preview instance"
-              onClick={() => {
-                if (!window.confirm('Merge the Helper worktree into main, delete the worktree and stop the 2027 preview?')) return;
-                setMerging(true);
-                onMerge();
-                window.setTimeout(() => setMerging(false), 4000);
-              }}
-            >{merging ? 'Merging…' : 'Merge → main'}</button>
+            disabled={busy}
+            title="Wipe this Agent session's saved history"
+          >Clear</button>
           )}
           <span className="spacer" />
           {busy
+            // Stop now reaches the cloud too, so it stays available for a run
+            // started from the app or another device.
             ? <button className="danger" onClick={onStop}>Stop</button>
             : <button className="primary" onClick={submit}>Send</button>}
         </div>
       </div>
         </div>
-        {historyOpen && (
+        {catscoOpen && catsco && (
+          <aside className="agent-history agent-catsco">
+            <div className="agent-history-head">
+              <span>Workspace</span>
+              <span className="spacer" />
+              <button className="ghost" title="Refresh" aria-label="Refresh" onClick={() => onCatsCoRefresh?.()}>⟳</button>
+              <button className="ghost" onClick={() => setCatscoOpen(false)}>×</button>
+            </div>
+            <div className="agent-catsco-scroll">
+              {catscoList?.error && <div className="agent-catsco-error">{catscoList.error}</div>}
+              {!catscoList && <div className="agent-session-empty">Loading…</div>}
+              {catscoList && (
+                <>
+              <div className="agent-catsco-label">Bots</div>
+              {catscoBots.map((bot) => (
+                <div
+                  key={bot.uid}
+                  className={`agent-catsco-row ${bot.isCurrent ? 'active' : ''}`}
+                  onClick={() => {
+                    if (bot.isCurrent) return;
+                    const ok = window.confirm(
+                      `Switch the local connector to "${bot.name}"? This machine's tools move to that bot and the current chat may pause for a moment.`,
+                    );
+                    if (ok) onCatsCoSwitchBot?.(bot.uid);
+                  }}
+                  title={bot.uid}
+                >
+                  <span className="agent-catsco-dot" />
+                  <span className="agent-catsco-name">{bot.name}</span>
+                </div>
+              ))}
+              {catscoBots.length === 0 && <div className="agent-session-empty">No bots</div>}
+
+              <div className="agent-catsco-label">Projects</div>
+              <form
+                className="agent-catsco-new"
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  const name = newProject.trim();
+                  if (!name) return;
+                  onCatsCoCreateProject?.(name);
+                  setNewProject('');
+                }}
+              >
+                <input
+                  value={newProject}
+                  placeholder="New project"
+                  onChange={(e) => setNewProject(e.target.value)}
+                />
+                <button className="ghost" type="submit" title="Create project" aria-label="Create project">+</button>
+              </form>
+              {catscoProjects.map((project) => {
+                const items = catscoByProject.get(project.id) ?? [];
+                const collapsed = collapsedProjects.has(project.id);
+                return (
+                  <div key={project.id} className="agent-catsco-project">
+                    <div className="agent-catsco-project-head" onClick={() => toggleProject(project.id)}>
+                      <span className="agent-catsco-caret">{collapsed ? '▸' : '▾'}</span>
+                      <span className="agent-catsco-name">{project.name}</span>
+                      <button
+                        className="ghost"
+                        title="New task in project"
+                        aria-label={`New task in ${project.name}`}
+                        onClick={(e) => { e.stopPropagation(); catscoNewTask(project.id); }}
+                      >+</button>
+                    </div>
+                    {!collapsed && items.map(renderConversation)}
+                    {!collapsed && items.length === 0 && <div className="agent-session-empty">No sessions</div>}
+                  </div>
+                );
+              })}
+              {catscoProjects.length === 0 && <div className="agent-session-empty">No projects yet</div>}
+
+              <div className="agent-catsco-label">Chats</div>
+              {catscoLoose.map(renderConversation)}
+              {catscoLoose.length === 0 && <div className="agent-session-empty">No chats</div>}
+                </>
+              )}
+            </div>
+          </aside>
+        )}
+        {historyOpen && !catsco && (
           <aside className="agent-history">
             <div className="agent-history-head">
               <span>Sessions</span>

@@ -30,4 +30,6 @@ export const config = {
   pluginsDir: path.join(installRoot, 'plugins'),
   xiaobaPath: path.resolve(process.env.REMOTEPAD_XIAOBA_PATH || path.join(installRoot, '..', 'XiaoBa-CLI')),
   xiaobaDataDir: path.join(os.homedir(), '.remotepad', 'xiaoba'),
+  /** Existing XiaoBa Dashboard (owns connector). Default loopback :3800. */
+  catscoDashboardUrl: String(process.env.REMOTEPAD_CATSCO_DASHBOARD || 'http://127.0.0.1:3800').replace(/\/$/, ''),
 };

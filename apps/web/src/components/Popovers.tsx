@@ -48,6 +48,8 @@ export function HelpPop({ onClose }: { onClose: () => void }) {
           <h3>Agent</h3>
           <p><kbd>+</kbd> new Agent session (selected repo) · <kbd>☰</kbd> history</p>
           <p><kbd>Enter</kbd> send · <kbd>Shift</kbd>+<kbd>Enter</kbd> newline</p>
+          <p>Computer name → <b>CatsCo</b> shows the existing desktop connector (does not start a second one)</p>
+          <p>Agent dock → <b>Local</b> / <b>CatsCo</b>: local XiaoBa, or your cloud employee via that connector</p>
         </section>
       </div>
     </div>

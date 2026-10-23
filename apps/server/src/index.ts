@@ -16,6 +16,7 @@ import { registerSessionRoutes } from './routes/session.ts';
 import { registerUiRoutes } from './routes/ui.ts';
 import { registerModuleRoutes } from './routes/modules.ts';
 import { registerLlmRoutes } from './routes/llm.ts';
+import { registerCatsCoRoutes } from './routes/catsco.ts';
 import { registerTermSocket } from './terminal/ws.ts';
 import { registerWatchSocket } from './watch.ts';
 import { registerAgentSocket } from './agent/ws.ts';
@@ -42,11 +43,15 @@ await registerGitRoutes(app);
 await registerUiRoutes(app);
 await registerModuleRoutes(app);
 await registerLlmRoutes(app);
+await registerCatsCoRoutes(app);
 await registerTermSocket(app);
 await registerWatchSocket(app);
 await registerAgentSocket(app);
 
-const webDist = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../web/dist');
+// apps/server/src → apps/web/dist is two levels up; '../../../' pointed at
+// /workspace/git/web/dist, which never exists, so the build produced a server
+// that served the API but no UI.
+const webDist = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../web/dist');
 if (fs.existsSync(webDist)) {
   await app.register(fastifyStatic, { root: webDist });
   app.setNotFoundHandler((req, reply) => {

@@ -81,12 +81,14 @@ function defineTheme(monaco: Parameters<NonNullable<React.ComponentProps<typeof 
       'editor.selectionBackground': '#6b94ff99',
       'editorLineNumber.foreground': '#8b95a6',
       'editorLineNumber.activeForeground': '#f7f8fb',
-      'diffEditor.insertedTextBackground': '#1b7a40cc',
-      'diffEditor.removedTextBackground': '#a82838cc',
-      'diffEditor.insertedLineBackground': '#1b7a40aa',
-      'diffEditor.removedLineBackground': '#a82838aa',
-      'diffEditorGutter.insertedLineBackground': '#1b7a40',
-      'diffEditorGutter.removedLineBackground': '#a82838',
+      // Low-alpha tints: the text stays the brightest thing on screen, the tint
+      // only says which side of the diff you are looking at.
+      'diffEditor.insertedTextBackground': '#3fb95055',
+      'diffEditor.removedTextBackground': '#f8514955',
+      'diffEditor.insertedLineBackground': '#3fb95033',
+      'diffEditor.removedLineBackground': '#f8514933',
+      'diffEditorGutter.insertedLineBackground': '#3fb95080',
+      'diffEditorGutter.removedLineBackground': '#f8514980',
     },
   });
   monaco.editor.setTheme('remotepad');

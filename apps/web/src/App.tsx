@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Panel, PanelGroup, PanelResizeHandle } from 'react-resizable-panels';
-import type { AgentChange, AgentClientMessage, AgentServerMessage, AgentSessionInfo, AgentStatus, Favorite, FsEntry, FsListResponse, FsReadResponse, FsStatResponse, GitDiffResponse, GitStatusResponse, MachineInfo, ModulesResponse, Repo, ReposResponse, SessionState, TermClientMessage, TermServerMessage, TermSessionInfo, ViewerEnabledMap, ViewerModuleId, WatchServerMessage } from '@remotepad/shared';
+import type { AgentBackend, AgentCatsCoList, AgentChange, AgentClientMessage, AgentServerMessage, AgentSessionInfo, AgentStatus, Favorite, FsEntry, FsListResponse, FsReadResponse, FsStatResponse, GitDiffResponse, GitStatusResponse, MachineInfo, ModulesResponse, Repo, ReposResponse, SessionState, TermClientMessage, TermServerMessage, TermSessionInfo, ViewerEnabledMap, ViewerModuleId, WatchServerMessage } from '@remotepad/shared';
 import { defaultViewerEnabled } from '@remotepad/shared';
 import { api } from './api';
 import { basename, dirname, hasRenderedView, viewerKind } from './files';
@@ -53,6 +53,16 @@ export function App() {
   const [agentSessionId, setAgentSessionId] = useState<string | undefined>();
   const [agentSessions, setAgentSessions] = useState<AgentSessionInfo[]>([]);
   const [agentWorkingCwd, setAgentWorkingCwd] = useState('');
+  const [agentBackend, setAgentBackend] = useState<AgentBackend>('local');
+  const [catscoList, setCatscoList] = useState<AgentCatsCoList | undefined>();
+  /** True between asking for another session and its ready: block Send meanwhile. */
+  const [agentSwitching, setAgentSwitching] = useState(false);
+  // Never let a missed ready leave the composer locked forever.
+  useEffect(() => {
+    if (!agentSwitching) return undefined;
+    const timer = setTimeout(() => setAgentSwitching(false), 6000);
+    return () => clearTimeout(timer);
+  }, [agentSwitching]);
   const [addressDropOver, setAddressDropOver] = useState(false);
 
   const termWs = useRef<WebSocket | null>(null);
@@ -86,6 +96,8 @@ export function App() {
   repoPathRef.current = repoPath;
   const agentSessionIdRef = useRef(agentSessionId);
   agentSessionIdRef.current = agentSessionId;
+  const agentBackendRef = useRef(agentBackend);
+  agentBackendRef.current = agentBackend;
   const agentStateRef = useRef(agentState);
   agentStateRef.current = agentState;
   const expandedRef = useRef(expanded);
@@ -390,7 +402,10 @@ export function App() {
       };
       ws.onclose = () => {
         if (closed) return;
-        if (agentStateRef.current === 'running') {
+        // Only a local turn dies with the server. A CatsCo turn runs in the
+        // cloud, so claiming it was interrupted invited a duplicate send; the
+        // reconnect resyncs and reports the real state instead.
+        if (agentBackendRef.current === 'local' && agentStateRef.current === 'running') {
           setAgentState('idle');
           setAgentMessages((prev) => [...prev, {
             id: agentMsgId.current++,
@@ -1020,8 +1035,53 @@ export function App() {
     setActivePath(filePath);
   };
 
+  /** Keep already-open editors in step with what the agent just wrote.
+   *
+   * Without this an open tab kept the bytes it loaded earlier, so the agent's
+   * edit only appeared after closing and reopening the file.
+   */
+  const syncOpenTabs = async (files: AgentChange[], touched?: string[]) => {
+    const scope = touched && touched.length
+      ? files.filter((item) => touched.includes(item.path))
+      : files;
+    if (!scope.length) return;
+    const wanted = new Map(scope.map((item) => [item.path, item]));
+    for (const tab of tabsRef.current) {
+      const change = wanted.get(tab.path);
+      if (!change || tab.kind === 'folder' || tab.kind === 'diff') continue;
+      // Never overwrite edits the reader has not saved.
+      let content = tab.content;
+      let saved = tab.savedContent;
+      if (!tab.dirty && !tab.binary) {
+        try {
+          const file = await api<FsReadResponse>(`/api/fs/read?path=${encodeURIComponent(tab.path)}`);
+          if (!file.binary) {
+            content = file.content;
+            saved = file.content;
+          }
+        } catch {
+          // The file may have been deleted; the change list already says so.
+        }
+      }
+      setTabs((prev) => prev.map((item) => {
+        if (item.path !== tab.path) return item;
+        return {
+          ...item,
+          content,
+          savedContent: saved,
+          loading: false,
+          diff: change.diff,
+          before: change.before,
+          after: change.after,
+          agentPath: tab.path,
+        };
+      }));
+    }
+  };
+
   const applyAgentChanges = (files: AgentChange[], touched?: string[]) => {
     setAgentChanges(files);
+    void syncOpenTabs(files, touched);
     const pending = new Set(files.map((item) => item.path));
     setTabs((prev) => prev
       // Drop leftover synthetic agent: tabs from the old flow.
@@ -1052,28 +1112,50 @@ export function App() {
   handleAgentEventRef.current = (msg) => {
     if (msg.type === 'ready') {
       const sameSession = Boolean(msg.sessionId && msg.sessionId === agentSessionIdRef.current);
+      const backendChanged = Boolean(msg.backend && msg.backend !== agentBackendRef.current);
       agentSessionIdRef.current = msg.sessionId;
       setAgentError(msg.error);
       setAgentSessionId(msg.sessionId);
       if (msg.cwd) setAgentWorkingCwd(msg.cwd);
       if (msg.sessions) setAgentSessions(msg.sessions);
+      if (msg.backend) setAgentBackend(msg.backend);
       setAgentChanges(msg.changes);
-      if (msg.history && !sameSession) {
-        setAgentMessages(msg.history.map((item) => ({
+      setAgentSwitching(false);
+      // Replace transcript on session switch, Local↔CatsCo switch, or CatsCo topic load.
+      // Empty [] must clear the pane (do not keep the other backend's messages).
+      if (Array.isArray(msg.history)) {
+        const replace = !sameSession || backendChanged || msg.backend === 'catsco';
+        const mapped = msg.history.map((item) => ({
           id: agentMsgId.current++,
           role: item.role,
           text: item.text,
           name: item.name,
-        })));
+        }));
+        // An empty pane refills too: after a reload the session id is unchanged,
+        // so the old guard left Local blank.
+        setAgentMessages((prev) => (replace || prev.length === 0 ? mapped : prev));
       }
       setAgentState((prev) => {
         if (msg.error) return 'error';
-        // Session switches must leave Working; only keep running for the same tab's hello refresh.
-        if (!sameSession) return 'idle';
+        // Session / backend switches must leave Working; only keep running for same-tab hello.
+        if (!sameSession || backendChanged || msg.backend === 'catsco') return 'idle';
         return prev === 'running' ? prev : 'idle';
       });
+    } else if (msg.type === 'backend') {
+      setAgentBackend(msg.backend);
+      if (msg.error !== undefined) setAgentError(msg.error);
     } else if (msg.type === 'sessions') {
       setAgentSessions(msg.sessions);
+    } else if (msg.type === 'catsco_list') {
+      setCatscoList({
+        bots: msg.bots,
+        projects: msg.projects,
+        conversations: msg.conversations,
+        topicId: msg.topicId,
+        userUid: msg.userUid,
+        ready: msg.ready,
+        error: msg.error,
+      });
     } else if (msg.type === 'user') {
       setAgentMessages((prev) => {
         const last = prev[prev.length - 1];
@@ -1390,6 +1472,7 @@ export function App() {
               sessionId={agentSessionId}
               agentSessions={agentSessions}
               state={agentState}
+              backend={agentBackend}
               messages={agentMessages}
               changes={agentChanges}
               onSend={(text) => {
@@ -1402,16 +1485,34 @@ export function App() {
                 setAgentState('idle');
                 sendAgent({ type: 'stop' });
               }}
+              onSetBackend={(backend) => {
+                // Clear only when the backend really changes. Clicking the active
+                // tab used to wipe the pane, and ready then ignored its history
+                // because the session had not changed — leaving an empty window.
+                const changed = backend !== agentBackend;
+                setAgentState('idle');
+                setAgentSwitching(true);
+                if (changed) {
+                  setAgentMessages([]);
+                  setCatscoList(undefined);
+                }
+                setAgentBackend(backend);
+                agentBackendRef.current = backend;
+                sendAgent({ type: 'set_backend', backend });
+              }}
               onClear={() => {
+                if (agentBackend === 'catsco') return;
                 setAgentMessages([]);
                 sendAgent({ type: 'clear' });
               }}
               onNew={() => {
-                setAgentMessages([]);
+                if (agentBackend === 'catsco') return;
+                // No lock and no blanking: ready replaces the transcript within
+                // ~100ms, and a locked composer on every switch felt like a hang.
                 sendAgent({ type: 'new' });
               }}
               onOpenSession={(id) => {
-                setAgentMessages([]);
+                if (agentBackend === 'catsco') return;
                 sendAgent({ type: 'open', id });
               }}
               onRenameSession={(id, title) => sendAgent({ type: 'rename', id, title })}
@@ -1427,9 +1528,23 @@ export function App() {
               onOpenSessionFile={(path) => {
                 void openFile({ name: basename(path), path, kind: 'file' });
               }}
-              onPublish={() => sendAgent({ type: 'publish' })}
-              onPreview={() => sendAgent({ type: 'preview' })}
-              onMerge={() => sendAgent({ type: 'merge' })}
+              catscoList={catscoList}
+              onCatsCoSelect={(topicId) => {
+                sendAgent({ type: 'catsco_select', topicId });
+              }}
+              onCatsCoRefresh={() => {
+                setCatscoList(undefined);
+                sendAgent({ type: 'catsco_refresh' });
+              }}
+              onCatsCoCreateProject={(name) => sendAgent({ type: 'catsco_project_create', name })}
+              onCatsCoCreateTask={(name, projectId) => sendAgent({ type: 'catsco_task_create', name, projectId })}
+              onCatsCoSwitchBot={(botUid) => {
+                setAgentSwitching(true);
+                setAgentMessages([]);
+                sendAgent({ type: 'catsco_bot_switch', botUid });
+              }}
+              onCatsCoCloseActive={() => setAgentMessages([])}
+              switching={agentSwitching}
             />
           </Panel>
           )}

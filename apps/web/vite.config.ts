@@ -13,6 +13,9 @@ export default defineConfig({
   server: {
     host,
     port: uiPort,
+    // Fail loudly instead of drifting to 5174 when a stray instance holds the
+    // port: a silent port change points the browser and the docs at nothing.
+    strictPort: true,
     proxy: {
       '/api': { target: `http://${host}:${port}` },
       '/ws': { target: `ws://${host}:${port}`, ws: true },
@@ -21,5 +24,6 @@ export default defineConfig({
   preview: {
     host,
     port: uiPort,
+    strictPort: true,
   },
 });

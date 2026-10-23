@@ -78,7 +78,7 @@ export function writeLlmFile(next: LlmFile): void {
   try { fs.chmodSync(FILE, 0o600); } catch { /* ignore */ }
 }
 
-/** Portal file wins over XiaoBa-CLI `.env` when it has a key. */
+/** Portal file wins over XiaoBa-CLI `.env` when it has a key. DeepSeek is OpenAI-compatible only. */
 export function applyLlmSettingsToEnv(): void {
   const saved = readLlmFile();
   if (!saved?.apiKey) return;

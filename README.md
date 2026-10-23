@@ -173,6 +173,7 @@ Repo `settings.json`: `host`, `port` (API / prod UI), `uiPort` (Vite dev only). 
 | `REMOTEPAD_ROOTS` | _(empty)_ | Extra allowed filesystem roots, colon-separated |
 | `REMOTEPAD_TEXT_LIMIT` | `8388608` | Max editable file size in bytes |
 | `REMOTEPAD_XIAOBA_PATH` | `../XiaoBa-CLI` (sibling of this repo) | Path to a built XiaoBa-CLI install used by the Agent panel |
+| `REMOTEPAD_CATSCO_DASHBOARD` | `http://127.0.0.1:3800` | XiaoBa Dashboard URL for **CatsCo** status (existing connector; RemotePad does not start a second one) |
 
 The file tree starts at `/`. Allowed paths include `/` plus `$HOME`, the process working directory, the RemotePad install directory, and `REMOTEPAD_ROOTS`.
 
@@ -256,7 +257,11 @@ The right dock is a chat client. **XiaoBa is not part of this repo.** RemotePad 
 
 There is no Helper agent, no worktree that edits RemotePad, and no preview port that merges back into this install. An Agent session works in the repo you selected (or the file-tree root). It does not maintain RemotePad.
 
-The panel is a full-height right dock. **+** starts a session (`rp-*`). **☰** opens history. Right-click a tab for **Open session JSONL**, rename, or close. The delivered chat is `~/.remotepad/history/{id}.jsonl`. XiaoBa's own model context (which it rewrites, and may stub old tool output) is `~/.remotepad/xiaoba/data/sessions/{id}.jsonl`. Titles live in `~/.remotepad/agent-active.json`. Click the computer name for host, git, terminals, viewer modules, and **Agent model** (key, model, API base, max output tokens in `~/.remotepad/llm.json`).
+The panel is a full-height right dock. **+** starts a session (`rp-*`). **☰** opens history. Right-click a tab for **Open session JSONL**, rename, or close. The delivered chat is `~/.remotepad/history/{id}.jsonl`. XiaoBa's own model context (which it rewrites, and may stub old tool output) is `~/.remotepad/xiaoba/data/sessions/{id}.jsonl`. Titles live in `~/.remotepad/agent-active.json`. Click the computer name for host, git, terminals, **CatsCo**, viewer modules, and **Agent model** (key, model, API base, max output tokens in `~/.remotepad/llm.json`).
+
+**CatsCo** in the Host pop is status only: it reads the XiaoBa Dashboard you already run (`REMOTEPAD_CATSCO_DASHBOARD`, default `http://127.0.0.1:3800`) — account, device, connector online/offline. It does not start a second connector.
+
+In the Agent dock, switch **Local** / **CatsCo**. Local uses the embedded XiaoBa runtime. **CatsCo** sends to your cloud employee over the same p2p chat as [app.catsco.cc](https://app.catsco.cc/) (via the Dashboard message API) and polls for replies. Keep the desktop connector online if the cloud agent should use this machine’s tools.
 
 File edits from the agent can be kept or undone in the panel. Shell side effects are not undone.
 
@@ -264,6 +269,7 @@ Requirements:
 
 - A XiaoBa-CLI checkout next to RemotePad (or `REMOTEPAD_XIAOBA_PATH`), built (`npm run build`) or loadable from `src/` via `tsx`
 - LLM: Host pop → **Agent model**, or `GAUZ_LLM_*` in that XiaoBa-CLI `.env` when `~/.remotepad/llm.json` has no key
+- Optional CatsCo status: XiaoBa Dashboard + connector already running (same as the desktop connector service)
 
 ## Repo layout
 
