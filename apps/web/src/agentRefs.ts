@@ -11,8 +11,8 @@
 export interface AgentRef {
   path: string;
   name: string;
-  /** Folders are labelled `[dir]` on the wire so the agent does not try to read them. */
-  kind?: 'file' | 'dir';
+  /** `dir` is sent as `[dir]`; `term` is a terminal snippet tied to its cwd. */
+  kind?: 'file' | 'dir' | 'term';
   startLine?: number;
   endLine?: number;
   /** Selected text, when the ref came from a copy. */
@@ -34,7 +34,7 @@ export function makeRef(input: {
   startLine?: number;
   endLine?: number;
   lang?: string;
-  kind?: 'file' | 'dir';
+  kind?: 'file' | 'dir' | 'term';
   taken?: string[];
 }): AgentRef {
   const name = input.path.split('/').filter(Boolean).pop() || input.path;
@@ -59,9 +59,9 @@ export function renderRefBlock(ref: AgentRef): string {
   const range = ref.startLine
     ? `:${ref.startLine}${ref.endLine && ref.endLine !== ref.startLine ? `-${ref.endLine}` : ''}`
     : '';
-  const head = `[${ref.kind === 'dir' ? 'dir' : 'file'}] ${ref.path}${range}`;
+  const head = `[${ref.kind ?? 'file'}] ${ref.path}${range}`;
   if (!ref.text) return head;
-  const lang = ref.lang || '';
+  const lang = ref.lang ?? (ref.kind === 'term' ? 'text' : '');
   return `${head}\n\`\`\`${lang}\n${ref.text.replace(/\n$/, '')}\n\`\`\``;
 }
 
@@ -81,9 +81,9 @@ export function expandDraft(draft: string, refs: AgentRef[]): string {
 
 export type WireSegment =
   | { kind: 'text'; text: string }
-  | { kind: 'ref'; path: string; label: string; dir?: boolean; code?: string; lang?: string };
+  | { kind: 'ref'; path: string; label: string; dir?: boolean; term?: boolean; code?: string; lang?: string };
 
-const FILE_LINE = /^\[(file|dir)\] (.+?)(?::(\d+)(?:-(\d+))?)?$/;
+const FILE_LINE = /^\[(file|dir|term)\] (.+?)(?::(\d+)(?:-(\d+))?)?$/;
 
 /** Split a sent message into plain text and reference segments. */
 export function parseWire(text: string): WireSegment[] {
@@ -123,7 +123,8 @@ export function parseWire(text: string): WireSegment[] {
       kind: 'ref',
       path,
       dir: label === 'dir',
-      label: refLabel({
+      term: label === 'term',
+      label: label === 'term' ? 'terminal' : refLabel({
         name,
         startLine: start ? Number(start) : undefined,
         endLine: end ? Number(end) : undefined,
@@ -137,7 +138,14 @@ export function parseWire(text: string): WireSegment[] {
 }
 
 /** Last selection copied out of the editor, offered to the compose paste. */
-let copied: { path: string; text: string; startLine: number; endLine: number; lang?: string } | null = null;
+let copied: {
+  path: string;
+  text: string;
+  startLine?: number;
+  endLine?: number;
+  lang?: string;
+  kind?: 'file' | 'dir' | 'term';
+} | null = null;
 
 export function rememberCopy(ref: NonNullable<typeof copied>) {
   copied = ref;
@@ -145,6 +153,16 @@ export function rememberCopy(ref: NonNullable<typeof copied>) {
 
 export function copiedSelection() {
   return copied;
+}
+
+/**
+ * Compare clipboard text with the remembered selection.
+ * Browsers normalise line endings and Monaco may keep trailing spaces, so a
+ * byte comparison would reject a legitimate paste.
+ */
+export function sameClipboardText(a: string, b: string): boolean {
+  const norm = (value: string) => value.replace(/\r\n/g, '\n').replace(/[ \t]+$/gm, '').trim();
+  return norm(a) !== '' && norm(a) === norm(b);
 }
 
 /** Forget the remembered selection once it has been turned into a token. */

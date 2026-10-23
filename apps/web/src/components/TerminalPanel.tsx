@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { rememberCopy } from '../agentRefs';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { WebLinksAddon } from '@xterm/addon-web-links';
@@ -78,11 +79,15 @@ export function TerminalPanel({
         const mod = ev.ctrlKey || ev.metaKey;
         const key = ev.key.toLowerCase();
         if (mod && key === 'c' && term.hasSelection()) {
-          void writeClipboard(term.getSelection());
+          const text = term.getSelection();
+          rememberCopy({ kind: 'term', path: session.cwd, text, lang: 'text' });
+          void writeClipboard(text);
           return false;
         }
         if (mod && ev.shiftKey && key === 'c') {
-          void writeClipboard(term.getSelection());
+          const text = term.getSelection();
+          if (text) rememberCopy({ kind: 'term', path: session.cwd, text, lang: 'text' });
+          void writeClipboard(text);
           return false;
         }
         if (key === 'insert' && mod && !ev.shiftKey && term.hasSelection()) {
@@ -95,7 +100,9 @@ export function TerminalPanel({
         e.preventDefault();
         e.stopPropagation();
         if (term.hasSelection()) {
-          void writeClipboard(term.getSelection());
+          const text = term.getSelection();
+          rememberCopy({ kind: 'term', path: session.cwd, text, lang: 'text' });
+          void writeClipboard(text);
           return;
         }
         void readClipboard().then((text) => {

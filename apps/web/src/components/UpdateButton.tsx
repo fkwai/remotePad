@@ -3,7 +3,7 @@ import type { UpdateResult, UpdateStatus } from '@remotepad/shared';
 import { api } from '../api';
 
 /**
- * "Behind origin" indicator in the top bar.
+ * Build indicator, next to the RemotePad wordmark (top left).
  *
  * The runtime polls its own checkout (GET /api/update). When origin has commits
  * this install does not, one click fast-forwards it (POST /api/update) and
@@ -29,7 +29,24 @@ export function UpdateButton({ onToast }: { onToast: (msg: string) => void }) {
     return () => window.clearInterval(timer);
   }, [check]);
 
-  if (!status || status.behind === 0) return null;
+  if (!status) return null;
+
+  // Always show which build is running: on a feature branch there is no
+  // origin/<branch> to compare, and "nothing to update" still needs an answer.
+  if (status.behind === 0) {
+    if (!status.head) return null;
+    const short = status.head.slice(0, 7);
+    const name = status.branch ?? 'detached';
+    const note = status.warning ? ` · ${status.warning}` : '';
+    return (
+      <span
+        className="version-badge"
+        title={`${status.repo} · ${name} @ ${status.head}${note}`}
+      >
+        {name}@{short}
+      </span>
+    );
+  }
 
   const apply = async () => {
     setBusy(true);

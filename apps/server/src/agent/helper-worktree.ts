@@ -7,17 +7,15 @@ import type { ChildProcess } from 'node:child_process';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { config } from '../config.ts';
+import { detectWorkId, previewPortsFor } from './worktree-id.ts';
 
 const execFileAsync = promisify(execFile);
 
 const WT_ROOT = path.join(os.homedir(), '.remotepad', 'helper-worktrees');
 const PREVIEW_LOG = path.join(os.homedir(), '.remotepad', 'helper-preview.log');
 
-/** One worktree for all Helper work — never a fresh tree per chat. */
-const WORK_ID = 'work';
-/** Fixed preview ports: the worktree gets its own instance next to the live one. */
-const PREVIEW_UI_PORT = 2027;
-const PREVIEW_API_PORT = 2028;
+const WORK_ID = detectWorkId(config.repoRoot);
+const PREVIEW_PORTS = previewPortsFor(WORK_ID);
 
 export type HelperWorktreeInfo = {
   path: string;
@@ -35,7 +33,7 @@ export function helperWorktreePath(_sessionId?: string): string {
 }
 
 export function helperPreviewPorts(): { port: number; uiPort: number } {
-  return { port: PREVIEW_API_PORT, uiPort: PREVIEW_UI_PORT };
+  return { ...PREVIEW_PORTS };
 }
 
 async function git(cwd: string, args: string[], opts?: { timeout?: number }): Promise<string> {
@@ -281,11 +279,11 @@ export type PreviewResult = { ok: boolean; message: string; url: string };
  */
 export async function startHelperPreview(sessionId: string): Promise<PreviewResult> {
   const info = await ensureHelperWorktree(sessionId);
-  const url = `http://${config.host}:${PREVIEW_UI_PORT}/`;
+  const url = `http://${config.host}:${PREVIEW_PORTS.uiPort}/`;
   seedSessionFromLive(info.path, true);
 
   const running = previewProc && !previewProc.killed;
-  if (running || (await portOpen(PREVIEW_UI_PORT))) {
+  if (running || (await portOpen(PREVIEW_PORTS.uiPort))) {
     return { ok: true, message: `Preview already running at ${url}`, url };
   }
 
@@ -319,7 +317,7 @@ export async function startHelperPreview(sessionId: string): Promise<PreviewResu
   }
 
   for (let i = 0; i < 60; i++) {
-    if (await portOpen(PREVIEW_UI_PORT)) {
+    if (await portOpen(PREVIEW_PORTS.uiPort)) {
       return { ok: true, message: `Preview up at ${url} (worktree: ${info.path})`, url };
     }
     await new Promise((r) => setTimeout(r, 500));
@@ -327,7 +325,7 @@ export async function startHelperPreview(sessionId: string): Promise<PreviewResu
 
   return {
     ok: false,
-    message: `Preview did not answer on ${PREVIEW_UI_PORT} yet. Log: ${PREVIEW_LOG}`,
+    message: `Preview did not answer on ${PREVIEW_PORTS.uiPort} yet. Log: ${PREVIEW_LOG}`,
     url,
   };
 }

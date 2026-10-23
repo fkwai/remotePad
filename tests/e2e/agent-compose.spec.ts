@@ -27,7 +27,7 @@ test.describe('agent compose', () => {
     });
 
     await gotoApp(page);
-    const compose = page.locator('.agent-compose textarea');
+    const compose = page.locator('.agent-compose-editor');
     await expect(compose).toBeVisible();
 
     const dataTransfer = await page.evaluateHandle(() => new DataTransfer());
@@ -40,15 +40,21 @@ test.describe('agent compose', () => {
 
     await compose.dispatchEvent('drop', { dataTransfer });
 
-    // Draft shows only the file name…
-    await expect(compose).toHaveValue(/@a\.md/);
-    await expect(compose).not.toHaveValue(new RegExp(fixture.markdown.replace(/[/.]/g, '\\$&')));
+    // The draft holds a colored chip, not a @token…
+    const chip = compose.locator('.agent-ref-chip');
+    await expect(chip).toHaveText('a.md');
+    await expect(compose).not.toContainText(fixture.markdown);
+
+    // …typing continues next to it.
+    await compose.click();
+    await page.keyboard.type('please review');
 
     await page.getByRole('button', { name: 'Send' }).click();
 
     // …the agent receives the absolute path…
     expect(sent).toHaveLength(1);
     expect(sent[0]).toContain(`[file] ${fixture.markdown}`);
+    expect(sent[0]).toContain('please review');
 
     // …and the transcript collapses it back into a chip.
     await expect(page.locator('.agent-ref').first()).toHaveText('a.md');
@@ -75,7 +81,7 @@ test.describe('agent compose', () => {
     });
 
     await gotoApp(page);
-    const compose = page.locator('.agent-compose textarea');
+    const compose = page.locator('.agent-compose-editor');
     await compose.fill('hello');
     await page.getByRole('button', { name: 'Send' }).click();
 

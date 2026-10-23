@@ -7,6 +7,7 @@ import {
   parseWire,
   rememberCopy,
   refLabel,
+  sameClipboardText,
   renderRefBlock,
 } from '../../apps/web/src/agentRefs.ts';
 
@@ -33,6 +34,8 @@ test.describe('agent references', () => {
       .toBe('[file] /srv/a/notes.md');
     expect(renderRefBlock(makeRef({ path: '/srv/a/sub', kind: 'dir' })))
       .toBe('[dir] /srv/a/sub');
+    expect(renderRefBlock(makeRef({ path: '/srv/proj', kind: 'term', text: 'ls -la\n' })))
+      .toBe('[term] /srv/proj\n```text\nls -la\n```');
     expect(renderRefBlock(makeRef({
       path: '/srv/a/notes.md', startLine: 2, endLine: 3, lang: 'markdown', text: 'one\ntwo\n',
     }))).toBe('[file] /srv/a/notes.md:2-3\n```markdown\none\ntwo\n```');
@@ -63,12 +66,19 @@ test.describe('agent references', () => {
         kind: 'ref',
         path: '/srv/a/keep.ts',
         dir: false,
+        term: false,
         label: 'keep.ts:1-2',
         code: 'const a = 1;',
         lang: 'ts',
       },
-      { kind: 'ref', path: '/srv/a/notes.md', dir: false, label: 'notes.md', code: undefined, lang: undefined },
+      { kind: 'ref', path: '/srv/a/notes.md', dir: false, term: false, label: 'notes.md', code: undefined, lang: undefined },
       { kind: 'text', text: 'and also the notes' },
+    ]);
+  });
+
+  test('parses a terminal snippet back to the terminal chip', () => {
+    expect(parseWire('[term] /srv/proj\n```text\nls -la\n```')).toEqual([
+      { kind: 'ref', path: '/srv/proj', label: 'terminal', dir: false, term: true, code: 'ls -la', lang: 'text' },
     ]);
   });
 
@@ -83,5 +93,14 @@ test.describe('agent references', () => {
 
     clearCopied();
     expect(copiedSelection()).toBeNull();
+  });
+});
+
+test.describe('clipboard matching', () => {
+  test('accepts line-ending and trailing-space differences', () => {
+    expect(sameClipboardText('a\r\nb\r\n', 'a\nb\n')).toBe(true);
+    expect(sameClipboardText('  x  \ny', 'x\ny')).toBe(true);
+    expect(sameClipboardText('a\nb', 'a\nc')).toBe(false);
+    expect(sameClipboardText('   ', '   ')).toBe(false);
   });
 });

@@ -1,9 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import {
-  clearCopied, copiedSelection, expandDraft, makeRef, parseWire, type AgentRef,
-} from '../agentRefs';
+import { parseWire } from '../agentRefs';
+import { AgentComposer, type ComposerHandle } from './AgentComposer';
 import type { AgentBackend, AgentCatsCoConversation, AgentCatsCoList, AgentChange, AgentSessionInfo, AgentStatus } from '@remotepad/shared';
 import { isHelperSessionId } from '@remotepad/shared';
 import { basename } from '../files';
@@ -96,7 +95,7 @@ export function AgentPanel({
   onAnswerRepoSuggestion?: (accept: boolean) => void;
 }) {
   const logRef = useRef<HTMLDivElement>(null);
-  const inputRef = useRef<HTMLTextAreaElement>(null);
+  const composerRef = useRef<ComposerHandle>(null);
   const pinBottom = useRef(false);
   const [query, setQuery] = useState('');
   const [renaming, setRenaming] = useState<string | null>(null);
@@ -110,8 +109,7 @@ export function AgentPanel({
   /** Stick to the newest message until the reader scrolls up. Starts true so the
    *  first history load (local or CatsCo) lands at the bottom, not at the top. */
   const stick = useRef(true);
-  const [refs, setRefs] = useState<Record<string, AgentRef[]>>({});
-  const [drafts, setDrafts] = useState<Record<string, string>>({});
+
   const [tabMenu, setTabMenu] = useState<{ x: number; y: number; id: string } | null>(null);
   const [sessionMenu, setSessionMenu] = useState<{ x: number; y: number; id: string } | null>(null);
   const [openTools, setOpenTools] = useState<Set<number>>(new Set());
@@ -128,8 +126,7 @@ export function AgentPanel({
     : undefined;
   const busy = state === 'running' || Boolean(activeConversation?.working) || Boolean(switching);
   const activeId = sessionId ?? '';
-  const activeRefs = refs[activeId] ?? [];
-  const draft = drafts[activeId] ?? '';
+
   const catscoBots = catscoList?.bots ?? [];
   const catscoProjects = catscoList?.projects ?? [];
   const catscoBotName = (catscoList?.bots ?? []).find((item) => item.isCurrent)?.name || 'CatsCo';
@@ -321,37 +318,7 @@ export function AgentPanel({
   }
 
   function submit() {
-    const body = expandDraft(draft, activeRefs);
-    if (!body.trim() || busy) return;
-    pinBottom.current = true;
-    onSend(body);
-    setDrafts((prev) => ({ ...prev, [activeId]: '' }));
-    setRefs((prev) => ({ ...prev, [activeId]: [] }));
-    requestAnimationFrame(() => inputRef.current?.focus());
-  }
-
-  /** Insert a token at the caret so the draft reads like prose. */
-  function insertToken(token: string) {
-    const el = inputRef.current;
-    const cur = draft;
-    const start = el?.selectionStart ?? cur.length;
-    const end = el?.selectionEnd ?? cur.length;
-    const before = cur.slice(0, start);
-    const after = cur.slice(end);
-    const lead = before && !/\s$/.test(before) ? ' ' : '';
-    const next = `${before}${lead}@${token} ${after}`;
-    setDrafts((prev) => ({ ...prev, [activeId]: next }));
-    const caret = (before + lead + '@' + token + ' ').length;
-    requestAnimationFrame(() => {
-      el?.focus();
-      el?.setSelectionRange(caret, caret);
-    });
-  }
-
-  function addRef(input: { path: string; text?: string; startLine?: number; endLine?: number; lang?: string; kind?: 'file' | 'dir' }) {
-    const ref = makeRef({ ...input, taken: activeRefs.map((item) => item.token) });
-    setRefs((prev) => ({ ...prev, [activeId]: [...(prev[activeId] ?? []), ref] }));
-    insertToken(ref.token);
+    composerRef.current?.submit();
   }
 
   function commitRename() {
@@ -620,7 +587,11 @@ export function AgentPanel({
                       ? <span key={i} className="agent-msg-text">{part.text}</span>
                       : (
                         <span key={i} className="agent-ref-wrap">
-                          <span className="agent-ref" title={part.path}>{part.dir ? '/' : ''}{part.label}</span>
+                          <span className="agent-ref" title={part.path}>
+                            {part.dir ? '/' : ''}
+                            {part.label}
+                            {part.code ? ` · ${part.code.split('\n').length} lines` : ''}
+                          </span>
                           {part.code !== undefined && (
                             <details className="agent-ref-code">
                               <summary>{part.code.split('\n').length} lines</summary>
@@ -782,14 +753,12 @@ export function AgentPanel({
           e.preventDefault();
           // Inline token, not a chip row: the path lands where the caret is and
           // is expanded to the absolute path only on send.
-          addRef({ path: entry.path, kind: entry.kind });
+          composerRef.current?.insertRef({ path: entry.path, kind: entry.kind });
         }}
       >
-        <textarea
-          ref={inputRef}
-          rows={3}
-          value={draft}
-          onChange={(e) => setDrafts((prev) => ({ ...prev, [activeId]: e.target.value }))}
+        <AgentComposer
+          ref={composerRef}
+          sessionKey={activeId}
           disabled={busy}
           placeholder={
             switching
@@ -798,29 +767,9 @@ export function AgentPanel({
               ? (catsco ? `${catscoBotName} is working… wait for the answer` : 'Agent is working… (Enter queues after stop)')
               : catsco ? 'Message CatsCo cloud · drop files or paste a selection' : 'Message local XiaoBa · drop files or paste a selection'
           }
-          onDragOver={(e) => {
-            if (hasEntryDrag(e)) e.preventDefault();
-          }}
-          onDrop={(e) => {
-            const entry = readEntryDrag(e);
-            if (!entry) return;
-            e.preventDefault();
-            addRef({ path: entry.path, kind: entry.kind });
-          }}
-          onPaste={(e) => {
-            const selection = copiedSelection();
-            const text = e.clipboardData.getData('text/plain');
-            if (!selection || !text) return;
-            if (text.replace(/\n$/, '') !== selection.text.replace(/\n$/, '')) return;
-            e.preventDefault();
-            addRef(selection);
-            clearCopied();
-          }}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter' && !e.shiftKey) {
-              e.preventDefault();
-              submit();
-            }
+          onSubmit={(wire) => {
+            pinBottom.current = true;
+            onSend(wire);
           }}
         />
         <div className="agent-compose-row">
@@ -828,7 +777,7 @@ export function AgentPanel({
           <button
             className="ghost"
             onClick={() => {
-              setRefs((prev) => ({ ...prev, [activeId]: [] }));
+              composerRef.current?.clear();
               onClear();
             }}
             disabled={busy}

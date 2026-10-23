@@ -1290,6 +1290,7 @@ export function App() {
         <button type="button" className="brand" onClick={() => { setHelpOpen((v) => !v); setHostOpen(false); }}>
           <span className="brand-mark" /> RemotePad
         </button>
+        <UpdateButton onToast={showToast} />
         <div
           className={`path ${addressDropOver ? 'drop-over' : ''}`}
           onDragOver={(e) => {
@@ -1344,7 +1345,6 @@ export function App() {
           onClick={() => setTermOpen((v) => !v)}
         >Terminal</button>
         )}
-        <UpdateButton onToast={showToast} />
         {machine && (
           <button
             type="button"
