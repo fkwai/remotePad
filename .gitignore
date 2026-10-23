@@ -14,3 +14,6 @@ samples/gitdemo/.git
 samples/plotdemo/latest.html
 samples/plotdemo/latest.png
 **/data/pet/
+
+# pnpm keeps its content-addressable store here when HOME is not writable
+/.pnpm-store/

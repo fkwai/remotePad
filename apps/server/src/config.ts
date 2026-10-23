@@ -30,6 +30,16 @@ export const config = {
   pluginsDir: path.join(installRoot, 'plugins'),
   xiaobaPath: path.resolve(process.env.REMOTEPAD_XIAOBA_PATH || path.join(installRoot, '..', 'XiaoBa-CLI')),
   xiaobaDataDir: path.join(os.homedir(), '.remotepad', 'xiaoba'),
+  /** Session files written by the agent on this machine.
+   *
+   * The agent runs under this same user, so its transcript is a local file we
+   * can read and tail. That removes the Dashboard from the transcript path
+   * entirely: history is a file read, and new records arrive by watch.
+   */
+  agentSessionsDir: path.resolve(
+    process.env.REMOTEPAD_AGENT_SESSIONS
+      || path.join(os.homedir(), 'data', 'sessions'),
+  ),
   /** Existing XiaoBa Dashboard (owns connector). Default loopback :3800. */
   catscoDashboardUrl: String(process.env.REMOTEPAD_CATSCO_DASHBOARD || 'http://127.0.0.1:3800').replace(/\/$/, ''),
 };
