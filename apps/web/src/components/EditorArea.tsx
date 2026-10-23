@@ -379,6 +379,16 @@ export function EditorArea({
                           });
                         };
                         node.addEventListener('copy', onCopy);
+                        // Monaco copies through a hidden textarea, so the DOM
+                        // 'copy' event sometimes targets a node outside the
+                        // editor. Observing the keydown catches Ctrl/Cmd+C
+                        // without overriding Monaco's own copy.
+                        const recordSelection = () => onCopy();
+                        const keySub = editor.onKeyDown((e) => {
+                          const isCopy = (e.ctrlKey || e.metaKey) && e.keyCode === monaco.KeyCode.KeyC;
+                          if (isCopy) recordSelection();
+                        });
+                        editor.onDidDispose(() => keySub.dispose());
                         editor.onDidDispose(() => {
                           node.removeEventListener('contextmenu', onMenu);
                           node.removeEventListener('copy', onCopy);
