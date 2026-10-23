@@ -1,4 +1,6 @@
 import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
 import { config } from './config.ts';
 
 /** This deployment has no Dashboard: the agent's own files are the source.
@@ -328,10 +330,51 @@ export async function createCatsCoProject(name: string): Promise<CatsCoProject> 
 }
 
 /** Every conversation the account can see: p2p chats, groups, agent tasks. */
+/** Account token and cloud base, read straight from the CLI's own config file.
+ *
+ * The Dashboard proxy is unavailable on the machine that runs the agent, but the
+ * account it runs as already holds a token, so the panel can ask the cloud for
+ * the same list the app shows — with the names the app displays.
+ */
+async function cloudAccount(): Promise<{ base: string; token: string } | null> {
+  try {
+    const raw = await fs.readFile(directConfigPath(), 'utf8');
+    const saved = JSON.parse(raw) as {
+      account?: { token?: string };
+      endpoints?: { httpBaseUrl?: string };
+    };
+    const base = String(saved?.endpoints?.httpBaseUrl || '').replace(/\/$/, '');
+    const token = String(saved?.account?.token || '').trim();
+    return base && token ? { base, token } : null;
+  } catch {
+    return null;
+  }
+}
+
+function directConfigPath(): string {
+  return process.env.CATSCO_CONFIG_FILE
+    || path.join(os.homedir(), '.xiaoba', 'catsco.json');
+}
+
+/** Same rows the Dashboard would proxy, fetched directly from the cloud. */
+async function cloudConversations(): Promise<Array<Record<string, unknown>>> {
+  const auth = await cloudAccount();
+  if (!auth) throw new Error('No CatsCo account token on this machine.');
+  const res = await fetch(`${auth.base}/api/conversations`, {
+    headers: { authorization: `Bearer ${auth.token}` },
+    signal: AbortSignal.timeout(20_000),
+  });
+  if (!res.ok) throw new Error(`CatsCo conversations: HTTP ${res.status}`);
+  const data = (await res.json()) as { conversations?: Array<Record<string, unknown>> };
+  return Array.isArray(data.conversations) ? data.conversations : [];
+}
+
 export async function listCatsCoConversations(): Promise<CatsCoConversation[]> {
-  if (localOnly()) return [];
-  const data = await dashGet<{ conversations?: Array<Record<string, unknown>> }>('/api/cats/conversations');
-  const list = Array.isArray(data.conversations) ? data.conversations : [];
+  // Local-only deployments skip the Dashboard but not the cloud: the names and
+  // projects only exist there.
+  const list = localOnly()
+    ? await cloudConversations()
+    : (await dashGet<{ conversations?: Array<Record<string, unknown>> }>('/api/cats/conversations')).conversations || [];
   return list.map((item) => {
     const id = String(item.id || '');
     const projectId = Number(item.project_id ?? 0);

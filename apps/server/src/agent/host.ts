@@ -1279,6 +1279,14 @@ export class AgentHost {
     let conversations: CatsCoConversation[] = settled[2].status === 'fulfilled'
       ? settled[2].value
       : [];
+    // Projects only exist in the cloud rows; the app groups by exactly these.
+    if (projects.length === 0) {
+      const seen = new Map<number, string>();
+      for (const item of conversations) {
+        if (item.projectId && item.projectName) seen.set(item.projectId, item.projectName);
+      }
+      for (const [id, name] of seen) projects.push({ id, name });
+    }
     if (conversations.length === 0) {
       const local = listLocalConversations();
       const summaries = await Promise.all(
