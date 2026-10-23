@@ -264,7 +264,7 @@ Click **RemotePad** in the top-left for the full help list. Common shortcuts (al
 - Drag paths into Editor / Terminal / Agent
 - Favorites & repos: right-click for explorer, startup, terminal, remove; drag to reorder
 - Click the computer name for host / git / terminals
-- Agent compose — drag a file in, or paste text you copied from the editor: the draft shows an inline `@file` token, the agent receives the absolute path (plus the selected code), and the transcript collapses it to a chip
+- Agent compose — drag a file in, or paste a selection copied from the editor or a terminal: the draft shows a colored inline chip (filename, folder or `terminal`), the agent receives the absolute path plus the copied code, and the transcript collapses it back to a chip
 - Agent replies are rendered as GitHub-flavoured markdown (tables, lists, code, math)
 - Top bar **Update N** — `origin/main` has N commits this install does not; one click fast-forwards and reloads (it refuses a dirty tree or local commits, and rebuilds the web bundle when UI code moved)
 

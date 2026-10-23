@@ -1938,7 +1938,8 @@ button.tree-node:hover { border-color: transparent; }
   min-width: 0;
 }
 .agent-chip:hover .ghost { opacity: 1; }
-.agent-compose textarea {
+.agent-compose textarea,
+.agent-compose-editor {
   width: 100%;
   resize: none;
   background: var(--bg);
@@ -1949,7 +1950,51 @@ button.tree-node:hover { border-color: transparent; }
   font: inherit;
   color: inherit;
 }
-.agent-compose textarea:focus { border-color: #4a7f73; }
+.agent-compose textarea:focus,
+.agent-compose-editor:focus { border-color: #4a7f73; }
+.agent-compose-editor {
+  min-height: 62px;
+  max-height: 220px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  line-height: 1.55;
+  cursor: text;
+}
+.agent-compose-editor.disabled { opacity: 0.65; }
+.agent-compose-editor[data-empty="true"]::before {
+  content: attr(data-placeholder);
+  color: var(--muted);
+  pointer-events: none;
+}
+/* Inline reference: a colored box the caret steps over, not a @token. */
+.agent-ref-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  margin: 1px 3px 1px 0;
+  padding: 0 7px;
+  border-radius: 6px;
+  font-size: 11.5px;
+  line-height: 18px;
+  white-space: nowrap;
+  vertical-align: baseline;
+  border: 1px solid #3c5a86;
+  background: #16233c;
+  color: #a9c6f2;
+  user-select: none;
+}
+.agent-ref-chip::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-radius: 2px;
+  background: #5b8bd8;
+}
+.agent-ref-chip.dir { border-color: #7a6a3c; background: #2a2415; color: #e2cf9b; }
+.agent-ref-chip.dir::before { background: #d8b45b; }
+.agent-ref-chip.term { border-color: #4a7f73; background: #14302c; color: #9fe0cd; }
+.agent-ref-chip.term::before { background: #7ee0c5; }
 .agent-compose-row {
   display: flex;
   align-items: center;
