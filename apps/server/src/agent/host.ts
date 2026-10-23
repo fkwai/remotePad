@@ -24,6 +24,15 @@ import {
 import { ChangeTracker } from './changes.ts';
 import { TurnSnapshot } from './turn-snapshot.ts';
 import {
+  agentSessionFile,
+  endOfCompleteLines,
+  listLocalConversations,
+  localConversationSummary,
+  readAgentRecords,
+  tailAgentSession,
+  type AgentRecord,
+} from './agent-sessions.ts';
+import {
   mergeCatsCoTranscript,
   readCatsCoTranscript,
   type StoredCatsCoMessage,
@@ -257,6 +266,8 @@ type SessionMeta = {
   id: string;
   titles: Record<string, string>;
   ids: string[];
+  /** Repos a session is about, keyed by sessionKey(). Absent means undecided. */
+  repos: Record<string, string[]>;
 };
 
 function newSessionId(): string {
@@ -265,6 +276,40 @@ function newSessionId(): string {
 
 function newHelperId(): string {
   return `helper-${Date.now().toString(36)}`;
+}
+
+function insideRoot(root: string, filePath: string): boolean {
+  const rel = path.relative(root, filePath);
+  return rel === '' || (rel !== '..' && !rel.startsWith(`..${path.sep}`) && !path.isAbsolute(rel));
+}
+
+/** Writes here are tooling, not a repo the user cares about. */
+function isNoisePath(abs: string): boolean {
+  const parts = abs.split(path.sep);
+  if (parts.includes('node_modules') || parts.includes('.git')) return true;
+  const roots = [
+    '/tmp',
+    '/var/tmp',
+    '/dev/shm',
+    path.join(os.homedir(), '.cache'),
+    path.join(os.homedir(), '.remotepad'),
+    path.join(os.homedir(), '.xiaoba'),
+  ];
+  return roots.some((root) => insideRoot(path.resolve(root), abs));
+}
+
+/** Repo root of a file, or null when it is not inside a git work tree. */
+function gitToplevel(abs: string): string | null {
+  try {
+    const out = execFileSync('git', ['-C', path.dirname(abs), 'rev-parse', '--show-toplevel'], {
+      encoding: 'utf8',
+      timeout: 2000,
+      stdio: ['ignore', 'pipe', 'ignore'],
+    }).trim();
+    return out ? path.resolve(out) : null;
+  } catch {
+    return null;
+  }
 }
 
 function isSessionId(id: string): boolean {
@@ -361,6 +406,7 @@ function readMeta(): SessionMeta {
       id?: string;
       titles?: Record<string, string>;
       ids?: string[];
+      repos?: Record<string, string[]>;
     };
     const id = typeof raw.id === 'string' && isSessionId(raw.id) ? raw.id : '';
     const titles: Record<string, string> = {};
@@ -371,15 +417,23 @@ function readMeta(): SessionMeta {
     }
     const ids = Array.isArray(raw.ids) ? raw.ids.filter((item) => typeof item === 'string' && isSessionId(item)) : [];
     if (id && !ids.includes(id)) ids.push(id);
-    return { id, titles, ids };
+    const repos: Record<string, string[]> = {};
+    if (raw.repos && typeof raw.repos === 'object') {
+      for (const [key, value] of Object.entries(raw.repos)) {
+        if (!Array.isArray(value)) continue;
+        const paths = value.filter((item): item is string => typeof item === 'string' && path.isAbsolute(item));
+        if (paths.length) repos[key] = [...new Set(paths)];
+      }
+    }
+    return { id, titles, ids, repos };
   } catch {
-    return { id: '', titles: {}, ids: [] };
+    return { id: '', titles: {}, ids: [], repos: {} };
   }
 }
 
 function writeMeta(meta: SessionMeta): void {
   fs.mkdirSync(path.dirname(ACTIVE_SESSION_PATH), { recursive: true });
-  fs.writeFileSync(ACTIVE_SESSION_PATH, JSON.stringify({ id: meta.id, titles: meta.titles, ids: meta.ids }, null, 2));
+  fs.writeFileSync(ACTIVE_SESSION_PATH, JSON.stringify({ id: meta.id, titles: meta.titles, ids: meta.ids, repos: meta.repos }, null, 2));
 }
 
 function rememberSessionId(id: string, meta = readMeta()): SessionMeta {
@@ -701,8 +755,17 @@ export class AgentHost {
   private catscoUserUid = '';
   /** One tracker per session: a file touched by one chat must not show in another. */
   private trackers = new Map<string, ChangeTracker>();
+  /** Paths already offered as "add this repo?" — asked once each. */
+  private suggested = new Set<string>();
+  /** Paths the user declined; quiet for the rest of this session. */
+  private dismissed = new Set<string>();
   /** What this turn started from; used when no tool event described the write. */
   private turnSnapshot = new TurnSnapshot();
+  /** Live follower for the agent's own session file on this machine. */
+  private agentTail: { stop: () => void } | null = null;
+  private agentTailTopic = '';
+  /** Quiet timer that decides a turn ended, with no network involved. */
+  private agentSettle: NodeJS.Timeout | null = null;
   private sending = false;
   /** Bumped on every session switch so an in-flight send cannot touch the new tab. */
   private runGen = 0;
@@ -718,11 +781,22 @@ export class AgentHost {
   private owners = new Map<string, string>();
 
   /** Current session's change tracker (lazy). */
+  /** Identity for anything that must be per conversation.
+   *
+   * CatsCo reuses the local session id, so the backend and cloud topic are part
+   * of the key; otherwise a CatsCo edit showed up in the Local chat.
+   */
+  private sessionKey(): string {
+    return this.backend === 'catsco'
+      ? `catsco:${this.catscoTopic || '_none'}`
+      : `local:${this.sessionId || '_none'}`;
+  }
+
   private get tracker(): ChangeTracker {
-    const id = this.sessionId || '_none';
+    const id = this.sessionKey();
     let item = this.trackers.get(id);
     if (!item) {
-      item = new ChangeTracker();
+      item = new ChangeTracker(id);
       this.trackers.set(id, item);
     }
     return item;
@@ -750,6 +824,8 @@ export class AgentHost {
     sessionId?: string;
     sessions: AgentSessionInfo[];
     changes: AgentChange[];
+    repos: string[];
+    sessionKey: string;
     state: AgentStatus;
     backend: AgentBackend;
   } {
@@ -760,6 +836,8 @@ export class AgentHost {
       sessionId: this.sessionId || undefined,
       sessions: listSessions(this.sessionId),
       changes: this.tracker.list(),
+      repos: this.repos(),
+      sessionKey: this.sessionKey(),
       state: this.status,
       backend: this.backend,
     };
@@ -770,7 +848,65 @@ export class AgentHost {
   }
 
   private emitChanges(touched: string[] = []): void {
-    this.emit({ type: 'changes', files: this.tracker.list(), touched });
+    this.emit({
+      type: 'changes',
+      files: this.tracker.list(),
+      touched,
+      sessionKey: this.sessionKey(),
+      backend: this.backend,
+    });
+    // A write outside every attached repo is worth one question, not a block.
+    void this.maybeSuggestRepo(touched.length ? touched : this.tracker.list().map((item) => item.path));
+  }
+
+  /** Repos this session is about. Empty means the user has not chosen yet. */
+  repos(): string[] {
+    return readMeta().repos[this.sessionKey()] || [];
+  }
+
+  private writeRepos(paths: string[]): void {
+    const meta = readMeta();
+    const key = this.sessionKey();
+    const clean = [...new Set(
+      paths.filter((item) => typeof item === 'string' && item.trim()).map((item) => path.resolve(item)),
+    )];
+    if (clean.length) meta.repos[key] = clean;
+    else delete meta.repos[key];
+    writeMeta(meta);
+  }
+
+  setRepos(paths: string[]): void {
+    this.writeRepos(paths);
+    this.emitReady(this.resolveCwd(), false);
+  }
+
+  addRepo(target: string): void {
+    const abs = path.resolve(target);
+    this.suggested.delete(abs);
+    this.writeRepos([...this.repos(), abs]);
+    this.emitReady(this.resolveCwd(), false);
+  }
+
+  dismissRepo(target: string): void {
+    // Quiet for this session only; another session may ask again.
+    this.dismissed.add(path.resolve(target));
+  }
+
+  /** Ask once per unknown repo, and only when the path really is inside one. */
+  private async maybeSuggestRepo(paths: string[]): Promise<void> {
+    if (this.backend !== 'local') return;
+    const repos = this.repos();
+    for (const item of paths) {
+      const abs = path.resolve(item);
+      if (repos.some((root) => insideRoot(path.resolve(root), abs))) continue;
+      if (this.suggested.has(abs) || this.dismissed.has(abs)) continue;
+      if (isNoisePath(abs)) continue;
+      const repo = gitToplevel(abs);
+      if (!repo || repos.some((root) => path.resolve(root) === repo)) continue;
+      this.suggested.add(abs);
+      this.emit({ type: 'repo_suggestion', path: abs, repo });
+      return;
+    }
   }
 
   private emitSessions(): void {
@@ -790,6 +926,8 @@ export class AgentHost {
       sessions: listSessions(this.sessionId),
       changes: this.tracker.list(),
       backend: this.backend,
+      repos: this.repos(),
+      sessionKey: this.sessionKey(),
     });
   }
 
@@ -840,7 +978,7 @@ export class AgentHost {
       );
     }
     bundle.session.setSystemPromptProvider(async () => {
-      const base = baseProvider ? await baseProvider() : '';
+      const base = this.withRepoPrompt(baseProvider ? await baseProvider() : '');
       if (isHelperSession(this.sessionId)) {
         return composeHelperPrompt(
           typeof base === 'string' ? base : '',
@@ -850,6 +988,23 @@ export class AgentHost {
       }
       return `${AGENT_LANGUAGE}\n\n${typeof base === 'string' ? base : ''}`.trim();
     });
+  }
+
+  /** Declared scope, restated every turn so the model never has to remember it. */
+  private repoPromptBlock(): string {
+    const repos = this.repos();
+    if (!repos.length) return '';
+    return [
+      '## Repositories this session is about',
+      ...repos.map((repo) => `- ${repo}`),
+      'Keep changes inside these. If something truly belongs elsewhere, say so before writing.',
+    ].join('\n');
+  }
+
+  private withRepoPrompt(base: string): string {
+    const block = this.repoPromptBlock();
+    if (!block) return base;
+    return `${base}\n\n${block}`.trim();
   }
 
   async hello(cwd: string, includeHistory = true): Promise<void> {
@@ -913,6 +1068,7 @@ export class AgentHost {
       return;
     }
     this.stopCatsCoListPoller();
+    this.stopAgentTail();
     // Come back to Local with a rebuilt session so the kept tabs re-read their
     // transcript from disk instead of showing what they had before the switch.
     this.envStamp = '';
@@ -1034,6 +1190,97 @@ export class AgentHost {
     void this.pollCatsCoState().catch(() => undefined);
   }
 
+  /** Follow the agent's session file for this conversation.
+   *
+   * Returns false when this topic has no file here (the agent runs elsewhere),
+   * so the caller keeps the Dashboard path for that case.
+   */
+  private async startAgentTail(topicId: string): Promise<boolean> {
+    if (this.agentTail && this.agentTailTopic === topicId) return true;
+    this.stopAgentTail();
+    if (!topicId) return false;
+    const file = agentSessionFile(topicId);
+    if (!file) return false;
+
+    const records = await readAgentRecords(file);
+    if (this.backend !== 'catsco') return false;
+    const history: AgentHistoryItem[] = records.map((item) => ({
+      role: item.role,
+      text: item.text,
+      name: item.name,
+    }));
+    const tailRecord = records[records.length - 1];
+    this.agentTailTopic = topicId;
+    this.emitReady(this.resolveCwd(), false, history);
+
+    // Follow only what is written from now on; the history above covers the rest.
+    const offset = await endOfCompleteLines(file);
+    this.agentTail = tailAgentSession(file, {
+      fromOffset: offset,
+      onRecords: (batch) => this.onAgentRecords(topicId, batch),
+      onReset: () => { this.agentTailTopic = ''; },
+    });
+    if (tailRecord && tailRecord.role === 'tool' && !this.sending) {
+      this.status = 'running';
+      this.emit({ type: 'status', state: 'running' });
+    }
+    return true;
+  }
+
+  private stopAgentTail(): void {
+    if (this.agentSettle) {
+      clearTimeout(this.agentSettle);
+      this.agentSettle = null;
+    }
+    this.agentTail?.stop();
+    this.agentTail = null;
+    this.agentTailTopic = '';
+  }
+
+  /** Turn appended records into panel events. File order is the turn order. */
+  private onAgentRecords(topicId: string, records: AgentRecord[]): void {
+    if (this.backend !== 'catsco' || this.agentTailTopic !== topicId) return;
+    if (this.agentSettle) {
+      clearTimeout(this.agentSettle);
+      this.agentSettle = null;
+    }
+    for (const record of records) {
+      if (record.role === 'tool') {
+        // A tool row is written when the call finished, so it arrives complete.
+        const id = `file-${record.toolCallId || `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`}`;
+        this.emit({ type: 'tool_start', name: record.name || 'tool', id });
+        this.emit({ type: 'tool_end', name: record.name || 'tool', id, ok: true, result: record.text });
+        if (this.status !== 'running' && !this.sending) {
+          this.status = 'running';
+          this.emit({ type: 'status', state: 'running' });
+        }
+        continue;
+      }
+      if (record.role === 'user') {
+        // Our own send already put this on screen.
+        if (this.sending) continue;
+        this.emit({ type: 'text', text: record.text.endsWith('\n') ? record.text : `${record.text}\n` });
+        continue;
+      }
+      this.emit({ type: 'text', text: record.text.endsWith('\n') ? record.text : `${record.text}\n` });
+    }
+
+    // The turn is over once the file stops growing and the last word was the
+    // agent's. Waiting for quiet also covers assistant text written between tools.
+    const last = records[records.length - 1];
+    if (last && last.role !== 'tool') {
+      this.agentSettle = setTimeout(() => {
+        this.agentSettle = null;
+        if (this.agentTailTopic !== topicId) return;
+        if (this.status === 'running') {
+          this.status = 'idle';
+          this.emit({ type: 'status', state: 'idle', message: 'session-file' });
+        }
+      }, 2000);
+      this.agentSettle.unref?.();
+    }
+  }
+
   /** Poll the cloud task state so the panel can disable Send while the agent runs. */
   private startCatsCoListPoller(): void {
     if (this.catscoListTimer) return;
@@ -1070,7 +1317,7 @@ export class AgentHost {
       // baseline here so its edits are still attributed to this conversation.
       if (justStarted) await this.turnSnapshot.capture(this.uiCwd || this.resolveCwd());
       if (justFinished) await this.applyTurnChanges();
-      if (!cloudWorking) await this.syncCatsCoTranscript(justFinished);
+      if (!cloudWorking && !this.agentTail) await this.syncCatsCoTranscript(justFinished);
       if (cloudWorking) await this.harvestCatsCoChanges().catch(() => undefined);
 
       const settled = this.settleTurn(conversations);
@@ -1158,9 +1405,30 @@ export class AgentHost {
     if (!this.stillCatsCo(gen)) return;
     const bots = settled[0].status === 'fulfilled' ? settled[0].value : [] as CatsCoBot[];
     const projects = settled[1].status === 'fulfilled' ? settled[1].value : [] as Array<{ id: number; name: string }>;
-    const conversations = settled[2].status === 'fulfilled' ? settled[2].value : [] as CatsCoConversation[];
     this.catscoBots = bots;
     this.catscoProjects = projects;
+    // The agent's own files describe its conversations. When the Dashboard is
+    // down (or absent, as on the machine that runs the agent) this is the whole
+    // list — no HTTP, and it cannot disagree with what the panel then reads.
+    let conversations: CatsCoConversation[] = settled[2].status === 'fulfilled'
+      ? settled[2].value
+      : [];
+    if (conversations.length === 0) {
+      const local = listLocalConversations();
+      const summaries = await Promise.all(
+        local.map(async (item) => ({ item, ...(await localConversationSummary(item.id)) })),
+      );
+      conversations = summaries.map(({ item, title, preview }) => ({
+        id: item.id,
+        title,
+        preview,
+        isGroup: item.id.startsWith('grp_'),
+        isTask: false,
+        updatedAt: item.updatedAt,
+        working: false,
+      }));
+    }
+    if (!this.stillCatsCo(gen)) return;
     const listFails = settled
       .map((item, i) => {
         if (item.status !== 'rejected') return '';
@@ -1179,7 +1447,10 @@ export class AgentHost {
       || (target.topicId && (known.size === 0 || known.has(target.topicId)) ? target.topicId : '')
       || conversations[0]?.id
       || '';
-    if (!target.ready && !topicId) {
+    // Without a Dashboard there is no bot identity, but the agent's files still
+    // name every conversation it has here, so the panel stays usable.
+    const hasLocalFiles = !target.ready && listLocalConversations(1).length > 0;
+    if (!target.ready && !topicId && !hasLocalFiles) {
       if (!this.stillCatsCo(gen)) return;
       this.error = target.reason || listError || 'CatsCo cloud chat is not ready';
       this.model = 'catsco/cloud';
@@ -1197,7 +1468,10 @@ export class AgentHost {
     this.model = `catsco/${this.catscoTitle || target.botName || target.botUid || 'cloud'}`;
     let history: AgentHistoryItem[] | undefined;
     let catscoRows: StoredCatsCoMessage[] | undefined;
-    if (includeHistory && topicId) {
+    // On this machine the agent writes its own session file: read it, follow it,
+    // and skip the Dashboard round trips for the transcript.
+    const tailing = includeHistory && topicId ? await this.startAgentTail(topicId) : false;
+    if (includeHistory && topicId && !tailing) {
       // Show the local copy immediately; the network only fills the gap.
       const cached = readCatsCoTranscript(topicId);
       if (cached && cached.messages.length) {
@@ -1237,7 +1511,8 @@ export class AgentHost {
     }
     if (!this.stillCatsCo(gen)) return;
     this.emitCatsCoList(bots, projects, conversations, topicId, listError);
-    this.emitReady(this.resolveCwd(), false, history);
+    // When tailing, startAgentTail already emitted this conversation's history.
+    if (!tailing) this.emitReady(this.resolveCwd(), false, history);
     this.emit({ type: 'backend', backend: 'catsco', model: this.model, error: this.error });
     // Don't clobber Working… if a CatsCo poll is mid-flight (list refresh).
     if (!this.sending) this.emit({ type: 'status', state: 'idle', message: 'backend' });

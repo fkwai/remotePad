@@ -48,6 +48,12 @@ export function App() {
   const [clipMenu, setClipMenu] = useState<{ x: number; y: number; text: string } | null>(null);
   const [agentMessages, setAgentMessages] = useState<AgentChatMessage[]>([]);
   const [agentChanges, setAgentChanges] = useState<AgentChange[]>([]);
+  /** Repos the open conversation is declared to be about. */
+  const [sessionRepos, setSessionRepos] = useState<string[]>([]);
+  /** A write landed outside every attached repo; ask once. */
+  const [repoSuggestion, setRepoSuggestion] = useState<{ path: string; repo: string } | null>(null);
+  /** Which conversation the current changes list belongs to. */
+  const agentSessionKeyRef = useRef('');
   const [agentState, setAgentState] = useState<AgentStatus>('idle');
   const [agentError, setAgentError] = useState<string | undefined>();
   const [agentSessionId, setAgentSessionId] = useState<string | undefined>();
@@ -1090,14 +1096,12 @@ export function App() {
         if (!tab.agentPath) return tab;
         const change = files.find((item) => item.path === tab.agentPath);
         if (!change) {
-          // Review done (Keep/Undo): stay on the real file, clear red/green.
-          return {
-            ...tab,
-            agentPath: undefined,
-            before: undefined,
-            after: undefined,
-            diff: undefined,
-          };
+          // Review done (Keep/Undo). A clean review tab goes away: keeping one
+          // per changed file filled the editor a round at a time. Unsaved edits
+          // stay open, just without the red/green overlay.
+          return tab.dirty
+            ? { ...tab, agentPath: undefined, before: undefined, after: undefined, diff: undefined }
+            : null;
         }
         return {
           ...tab,
@@ -1105,7 +1109,8 @@ export function App() {
           before: change.before,
           after: change.after,
         };
-      }));
+      })
+      .filter((tab): tab is OpenTab => Boolean(tab)));
     if (touched?.length) void reloadTouched(touched);
   };
 
@@ -1120,6 +1125,8 @@ export function App() {
       if (msg.sessions) setAgentSessions(msg.sessions);
       if (msg.backend) setAgentBackend(msg.backend);
       setAgentChanges(msg.changes);
+      if (msg.sessionKey) agentSessionKeyRef.current = msg.sessionKey;
+      setSessionRepos(msg.repos ?? []);
       setAgentSwitching(false);
       // Replace transcript on session switch, Local↔CatsCo switch, or CatsCo topic load.
       // Empty [] must clear the pane (do not keep the other backend's messages).
@@ -1205,7 +1212,15 @@ export function App() {
       setAgentState(msg.state);
       if (msg.message === 'cleared' || msg.message === 'new') setAgentMessages([]);
     } else if (msg.type === 'changes') {
+      // Another conversation's edits must not paint this tree: the socket is
+      // shared, so the key decides.
+      // Fail open: only a known, different conversation is ignored. A stale or
+      // empty key used to hide every change, which read as "the diff is gone".
+      if (!agentSessionKeyRef.current && msg.sessionKey) agentSessionKeyRef.current = msg.sessionKey;
+      if (msg.sessionKey && msg.sessionKey !== agentSessionKeyRef.current) return;
       applyAgentChanges(msg.files, msg.touched);
+    } else if (msg.type === 'repo_suggestion') {
+      setRepoSuggestion({ path: msg.path, repo: msg.repo });
     } else if (msg.type === 'error') {
       setAgentError(msg.message);
       setAgentMessages((prev) => [...prev, {
@@ -1545,6 +1560,24 @@ export function App() {
               }}
               onCatsCoCloseActive={() => setAgentMessages([])}
               switching={agentSwitching}
+              sessionRepos={sessionRepos}
+              onRemoveSessionRepo={(target) => {
+                const next = sessionRepos.filter((item) => item !== target);
+                setSessionRepos(next);
+                sendAgent({ type: 'repos_set', paths: next });
+              }}
+              repoSuggestion={repoSuggestion}
+              onAnswerRepoSuggestion={(accept) => {
+                const current = repoSuggestion;
+                setRepoSuggestion(null);
+                if (!current) return;
+                if (accept) {
+                  setSessionRepos((prev) => (prev.includes(current.repo) ? prev : [...prev, current.repo]));
+                  sendAgent({ type: 'repos_add', path: current.repo });
+                } else {
+                  sendAgent({ type: 'repos_dismiss', path: current.path });
+                }
+              }}
             />
           </Panel>
           )}

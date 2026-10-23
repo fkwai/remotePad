@@ -1,4 +1,5 @@
 import { execFile } from 'node:child_process';
+import fsSync from 'node:fs';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -37,6 +38,45 @@ export class ChangeTracker {
   private entries = new Map<string, Entry>();
   /** Content the user already accepted; the reference for the next write. */
   private accepted = new Map<string, Snap>();
+
+  /** Persist the accepted baselines for this conversation.
+   *
+   * Keep is a promise that the file stops showing up. Holding it only in memory
+   * broke that promise on the next restart: the reference fell back to HEAD, and
+   * every kept file came back as a fresh change.
+   */
+  constructor(private readonly key = 'default') {
+    this.loadAccepted();
+  }
+
+  private acceptedFile(): string {
+    const safe = this.key.replace(/[^a-zA-Z0-9_.-]/g, '_');
+    return path.join(os.homedir(), '.remotepad', 'accepted', `${safe}.json`);
+  }
+
+  private loadAccepted(): void {
+    try {
+      const raw = JSON.parse(fsSync.readFileSync(this.acceptedFile(), 'utf8')) as Record<string, string | null>;
+      for (const [abs, text] of Object.entries(raw)) {
+        this.accepted.set(abs, text === null
+          ? { missing: true, binary: false, text: null, buf: null }
+          : { missing: false, binary: false, text, buf: Buffer.from(text) });
+      }
+    } catch {
+      // No saved baselines yet.
+    }
+  }
+
+  private saveAccepted(): void {
+    try {
+      const out: Record<string, string | null> = {};
+      for (const [abs, snap] of this.accepted) out[abs] = snap.missing ? null : snap.text;
+      fsSync.mkdirSync(path.dirname(this.acceptedFile()), { recursive: true });
+      fsSync.writeFileSync(this.acceptedFile(), JSON.stringify(out));
+    } catch {
+      // Losing the record only costs one extra diff later.
+    }
+  }
 
   list(): AgentChange[] {
     this.dropIgnored();
@@ -85,6 +125,14 @@ export class ChangeTracker {
     if (isRuntimePath(abs)) return false;
     // A hook already captured the real pre-write content: keep that baseline.
     if (this.entries.has(abs)) return this.refresh(abs);
+    // An accepted file is the reference, not git. Its caller may hand over HEAD
+    // content (the file is still dirty versus git after Keep), and diffing from
+    // HEAD resurrected a change the user had already accepted.
+    const accepted = this.accepted.get(abs);
+    if (accepted) {
+      this.entries.set(abs, { original: accepted, current: accepted, diff: '' });
+      return this.refresh(abs);
+    }
     const original: Snap = before === null
       ? { missing: true, binary: false, text: null, buf: null }
       : { missing: false, binary: false, text: before, buf: Buffer.from(before) };
@@ -123,6 +171,7 @@ export class ChangeTracker {
     const entry = this.entries.get(abs);
     if (entry) this.accepted.set(abs, entry.current);
     this.entries.delete(abs);
+    this.saveAccepted();
     return [abs];
   }
 
@@ -136,6 +185,10 @@ export class ChangeTracker {
     if (!entry) return [];
     await restoreSnap(abs, entry.original);
     this.entries.delete(abs);
+    // Undo puts the file back at the reference; keep that reference stable so a
+    // later turn does not diff it against HEAD.
+    this.accepted.set(abs, entry.original);
+    this.saveAccepted();
     return [abs];
   }
 
@@ -144,6 +197,7 @@ export class ChangeTracker {
     const paths = [...this.entries.keys()];
     for (const [abs, entry] of this.entries) this.accepted.set(abs, entry.current);
     this.entries.clear();
+    this.saveAccepted();
     return paths;
   }
 

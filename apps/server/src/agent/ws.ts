@@ -63,6 +63,12 @@ export async function registerAgentSocket(app: FastifyInstance) {
             agentHost.renameSession(msg.id, msg.title);
           } else if (msg.type === 'delete') {
             await agentHost.deleteSession(msg.id);
+          } else if (msg.type === 'repos_set') {
+            agentHost.setRepos(msg.paths);
+          } else if (msg.type === 'repos_add') {
+            agentHost.addRepo(msg.path);
+          } else if (msg.type === 'repos_dismiss') {
+            agentHost.dismissRepo(msg.path);
           } else if (msg.type === 'accept') {
             await agentHost.accept(msg.path);
           } else if (msg.type === 'undo') {

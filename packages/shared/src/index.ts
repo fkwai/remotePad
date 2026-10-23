@@ -285,6 +285,9 @@ export type AgentClientMessage =
   | { type: 'open'; id: string }
   | { type: 'rename'; id: string; title: string }
   | { type: 'delete'; id: string }
+  | { type: 'repos_set'; paths: string[] }
+  | { type: 'repos_add'; path: string }
+  | { type: 'repos_dismiss'; path: string }
   | { type: 'accept'; path: string }
   | { type: 'undo'; path: string }
   | { type: 'accept_all' }
@@ -321,6 +324,10 @@ export type AgentServerMessage =
     sessions?: AgentSessionInfo[];
     changes: AgentChange[];
     backend?: AgentBackend;
+    /** Repos this session is about; empty means "not chosen yet". */
+    repos?: string[];
+    /** Identity of the conversation these fields describe. */
+    sessionKey?: string;
   }
   | { type: 'backend'; backend: AgentBackend; model?: string; error?: string }
   | { type: 'sessions'; sessions: AgentSessionInfo[] }
@@ -332,7 +339,9 @@ export type AgentServerMessage =
   | { type: 'tool_end'; name: string; id?: string; ok?: boolean; result?: string; sessionId?: string }
   | { type: 'status'; state: AgentStatus; message?: string; sessionId?: string }
   /** Only ever for one session: the panel must not show another chat's edits. */
-  | { type: 'changes'; files: AgentChange[]; touched?: string[]; sessionId?: string }
+  | { type: 'changes'; files: AgentChange[]; touched?: string[]; sessionKey?: string; backend?: AgentBackend }
+  /** A write landed outside every repo attached to this session. */
+  | { type: 'repo_suggestion'; path: string; repo: string }
   | { type: 'error'; message: string; sessionId?: string };
 
 export const TEXT_SIZE_LIMIT = 8 * 1024 * 1024;

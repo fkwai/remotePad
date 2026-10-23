@@ -32,6 +32,10 @@ export function RightDock({
   onCatsCoSwitchBot,
   onCatsCoCloseActive,
   switching,
+  sessionRepos,
+  onRemoveSessionRepo,
+  repoSuggestion,
+  onAnswerRepoSuggestion,
 }: {
   cwd: string;
   error?: string;
@@ -63,6 +67,10 @@ export function RightDock({
   onCatsCoSwitchBot?: (botUid: string) => void;
   onCatsCoCloseActive?: () => void;
   switching?: boolean;
+  sessionRepos?: string[];
+  onRemoveSessionRepo?: (path: string) => void;
+  repoSuggestion?: { path: string; repo: string } | null;
+  onAnswerRepoSuggestion?: (accept: boolean) => void;
 }) {
   return (
     <div className="pane">
@@ -97,6 +105,10 @@ export function RightDock({
         onCatsCoSwitchBot={onCatsCoSwitchBot}
         onCatsCoCloseActive={onCatsCoCloseActive}
         switching={switching}
+        sessionRepos={sessionRepos}
+        onRemoveSessionRepo={onRemoveSessionRepo}
+        repoSuggestion={repoSuggestion}
+        onAnswerRepoSuggestion={onAnswerRepoSuggestion}
       />
     </div>
   );

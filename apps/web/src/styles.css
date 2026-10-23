@@ -1853,6 +1853,33 @@ button.tree-node:hover { border-color: transparent; }
 .agent-steps-head:hover { background: var(--panel-3); }
 .agent-steps-label { font-variant-numeric: tabular-nums; }
 .agent-steps.open .agent-steps-label { color: var(--text); }
+.agent-repos { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+.agent-repo-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 1px 2px 1px 7px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  font-size: 11px;
+  color: var(--faint);
+}
+.agent-repo-chip button { padding: 0 4px; font-size: 12px; line-height: 1; }
+.agent-repo-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin: 6px 2px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel-3);
+  font-size: 12px;
+}
+.agent-repo-card-text { display: flex; flex-direction: column; gap: 3px; color: var(--text); }
+.agent-repo-card-text code { font-size: 11px; color: var(--faint); }
+.agent-repo-card-actions { display: flex; gap: 6px; flex: none; }
 .agent-typing {
   display: flex;
   align-items: center;

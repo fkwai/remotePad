@@ -24,10 +24,13 @@ const MAX_FILES = 400;
 export class TurnSnapshot {
   private root: string | null = null;
   private baseline = new Map<string, Baseline>();
+  /** False after a finish: a second finish would have no baseline to compare. */
+  private armed = false;
 
   async capture(startCwd: string): Promise<void> {
     this.root = await findRepoRoot(startCwd);
     this.baseline.clear();
+    this.armed = Boolean(this.root);
     if (!this.root) return;
     const dirty = await this.dirtyFiles(this.root);
     let budget = MAX_TOTAL_BYTES;
@@ -47,7 +50,11 @@ export class TurnSnapshot {
   /** Files this turn changed, paired with what they looked like before it. */
   async finish(): Promise<Array<{ abs: string; before: Baseline }>> {
     const root = this.root;
-    if (!root) return [];
+    // Consumed. Without this, a second finish (send() then the poller) fell back
+    // to HEAD for every dirty file — which re-reported changes the user had
+    // already kept, and files this turn never touched at all.
+    if (!root || !this.armed) return [];
+    this.armed = false;
     const now = new Map<string, string>();
     for (const rel of await this.dirtyFiles(root)) now.set(rel, path.join(root, rel));
 

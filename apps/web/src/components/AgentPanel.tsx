@@ -45,6 +45,10 @@ export function AgentPanel({
   onCatsCoSwitchBot,
   onCatsCoCloseActive,
   switching,
+  sessionRepos,
+  onRemoveSessionRepo,
+  repoSuggestion,
+  onAnswerRepoSuggestion,
 }: {
   cwd: string;
   error?: string;
@@ -79,6 +83,12 @@ export function AgentPanel({
   onCatsCoCloseActive?: () => void;
   /** A session/backend switch is in flight; sending now would hit the old session. */
   switching?: boolean;
+  /** Repos this conversation is about; empty means not chosen yet. */
+  sessionRepos?: string[];
+  onRemoveSessionRepo?: (path: string) => void;
+  /** A write outside every attached repo, waiting for a yes/no. */
+  repoSuggestion?: { path: string; repo: string } | null;
+  onAnswerRepoSuggestion?: (accept: boolean) => void;
 }) {
   const logRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -447,6 +457,20 @@ export function AgentPanel({
         <span className="agent-backend-hint">
           {catsco ? 'Cloud employee · same chat as app.catsco.cc' : 'Local runtime · selected repo'}
         </span>
+        {(sessionRepos?.length ?? 0) > 0 && (
+          <div className="agent-repos">
+            {sessionRepos!.map((repo) => (
+              <span className="agent-repo-chip" key={repo} title={repo}>
+                {repo.split('/').filter(Boolean).pop() || repo}
+                <button
+                  className="ghost"
+                  onClick={() => onRemoveSessionRepo?.(repo)}
+                  title={`Detach ${repo}`}
+                >×</button>
+              </span>
+            ))}
+          </div>
+        )}
       </div>
       <div className="agent-chrome">
         <div className="agent-tabs">
@@ -696,6 +720,18 @@ export function AgentPanel({
               </div>
             );
           })}
+        </div>
+      )}
+      {repoSuggestion && (
+        <div className="agent-repo-card">
+          <div className="agent-repo-card-text">
+            This write is outside the session's repos:
+            <code>{repoSuggestion.repo}</code>
+          </div>
+          <div className="agent-repo-card-actions">
+            <button className="primary" onClick={() => onAnswerRepoSuggestion?.(true)}>Add repo</button>
+            <button className="ghost" onClick={() => onAnswerRepoSuggestion?.(false)}>No</button>
+          </div>
         </div>
       )}
       <div
