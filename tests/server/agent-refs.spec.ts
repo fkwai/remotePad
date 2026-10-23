@@ -7,6 +7,7 @@ import {
   parseWire,
   rememberCopy,
   refLabel,
+  sameClipboardText,
   renderRefBlock,
 } from '../../apps/web/src/agentRefs.ts';
 
@@ -83,5 +84,14 @@ test.describe('agent references', () => {
 
     clearCopied();
     expect(copiedSelection()).toBeNull();
+  });
+});
+
+test.describe('clipboard matching', () => {
+  test('accepts line-ending and trailing-space differences', () => {
+    expect(sameClipboardText('a\r\nb\r\n', 'a\nb\n')).toBe(true);
+    expect(sameClipboardText('  x  \ny', 'x\ny')).toBe(true);
+    expect(sameClipboardText('a\nb', 'a\nc')).toBe(false);
+    expect(sameClipboardText('   ', '   ')).toBe(false);
   });
 });

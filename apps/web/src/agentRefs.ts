@@ -147,6 +147,16 @@ export function copiedSelection() {
   return copied;
 }
 
+/**
+ * Compare clipboard text with the remembered selection.
+ * Browsers normalise line endings and Monaco may keep trailing spaces, so a
+ * byte comparison would reject a legitimate paste.
+ */
+export function sameClipboardText(a: string, b: string): boolean {
+  const norm = (value: string) => value.replace(/\r\n/g, '\n').replace(/[ \t]+$/gm, '').trim();
+  return norm(a) !== '' && norm(a) === norm(b);
+}
+
 /** Forget the remembered selection once it has been turned into a token. */
 export function clearCopied() {
   copied = null;

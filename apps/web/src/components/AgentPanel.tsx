@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import {
-  clearCopied, copiedSelection, expandDraft, makeRef, parseWire, type AgentRef,
+  clearCopied, copiedSelection, expandDraft, makeRef, parseWire, sameClipboardText, type AgentRef,
 } from '../agentRefs';
 import type { AgentBackend, AgentCatsCoConversation, AgentCatsCoList, AgentChange, AgentSessionInfo, AgentStatus } from '@remotepad/shared';
 import { isHelperSessionId } from '@remotepad/shared';
@@ -775,7 +775,7 @@ export function AgentPanel({
             const selection = copiedSelection();
             const text = e.clipboardData.getData('text/plain');
             if (!selection || !text) return;
-            if (text.replace(/\n$/, '') !== selection.text.replace(/\n$/, '')) return;
+            if (!sameClipboardText(text, selection.text)) return;
             e.preventDefault();
             addRef(selection);
             clearCopied();

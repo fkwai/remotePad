@@ -365,30 +365,43 @@ export function EditorArea({
                           setEdMenu({ x: ev.clientX, y: ev.clientY });
                         };
                         node.addEventListener('contextmenu', onMenu);
-                        const onCopy = () => {
+                        const onCopy = () => { captureCopy(); };
+                        const captureCopy = (): string | null => {
                           const current = activeTabRef.current;
                           const selection = editor.getSelection();
                           const model = editor.getModel();
-                          if (!current || !selection || !model || selection.isEmpty()) return;
+                          if (!current || !selection || !model || selection.isEmpty()) return null;
+                          const text = model.getValueInRange(selection);
                           rememberCopy({
                             path: current.path,
-                            text: model.getValueInRange(selection),
+                            text,
                             startLine: selection.startLineNumber,
                             endLine: selection.endLineNumber,
                             lang: model.getLanguageId(),
                           });
+                          return text;
                         };
-                        node.addEventListener('copy', onCopy);
-                        // Monaco copies through a hidden textarea, so the DOM
-                        // 'copy' event sometimes targets a node outside the
-                        // editor. Observing the keydown catches Ctrl/Cmd+C
-                        // without overriding Monaco's own copy.
-                        const recordSelection = () => onCopy();
-                        const keySub = editor.onKeyDown((e) => {
-                          const isCopy = (e.ctrlKey || e.metaKey) && e.keyCode === monaco.KeyCode.KeyC;
-                          if (isCopy) recordSelection();
-                        });
-                        editor.onDidDispose(() => keySub.dispose());
+                        // Menu / browser copy still records the range.
+                        node.addEventListener('copy', () => { captureCopy(); });
+                        // Ctrl/Cmd+C: record the range *and* write the exact text to
+                        // the clipboard, so the paste side can match it byte for
+                        // byte. Monaco's own copy goes through a hidden textarea and
+                        // can differ in trailing whitespace.
+                        editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyC, () => {
+                          const text = captureCopy();
+                          if (text === null) {
+                            editor.trigger('keyboard', 'editor.action.clipboardCopyAction', null);
+                            return;
+                          }
+                          const written = navigator.clipboard?.writeText(text);
+                          if (written) {
+                            written.catch(() => {
+                              editor.trigger('keyboard', 'editor.action.clipboardCopyAction', null);
+                            });
+                          } else {
+                            editor.trigger('keyboard', 'editor.action.clipboardCopyAction', null);
+                          }
+                        }, 'editorTextFocus');
                         editor.onDidDispose(() => {
                           node.removeEventListener('contextmenu', onMenu);
                           node.removeEventListener('copy', onCopy);
