@@ -73,6 +73,28 @@ pnpm start
 
 `pnpm start` serves the built UI from the Fastify process on port 3847.
 
+## Tests
+
+End-to-end tests drive the real UI in Chromium (clicks, right-click menus, address bar, terminal) against a throwaway instance of the app.
+
+```bash
+pnpm install
+npx playwright install chromium   # first time only
+pnpm test:e2e                     # headless, ~20s
+pnpm test:e2e:headed              # watch the clicks
+```
+
+The suite lives in `tests/e2e/` and is configured by `playwright.config.ts`. It is isolated from your working install:
+
+| Shared resource | Test instance |
+| --- | --- |
+| API / UI ports | `3999` (Fastify) + `3998` (Vite dev), from `.e2e/settings.json` |
+| `$HOME` | `.e2e/home`, so `~/.remotepad` (favorites, repos, plots, agent sessions) is never touched |
+| `tmp/session.json` | `.e2e/session.json` via `REMOTEPAD_SESSION_PATH` |
+| Fixtures | `.e2e/work` (`a.md`, `b.csv`, `notes.txt`, `sub/`) |
+
+`.e2e/` is recreated on every run and is gitignored. Tests never write to your own RemotePad state, so a live instance on 3847 can keep running while the suite executes.
+
 ## Access
 
 RemotePad listens on localhost on the machine where it runs. There is no authentication — do not expose it to the public internet.
@@ -170,6 +192,7 @@ Repo `settings.json`: `host`, `port` (API / prod UI), `uiPort` (Vite dev only). 
 | `REMOTEPAD_PORT` | `settings.json` → `3847` | Backend port |
 | `REMOTEPAD_UI_PORT` | `settings.json` → `5173` | Vite dev UI port |
 | `REMOTEPAD_SETTINGS` | `<install>/settings.json` | Path to settings file |
+| `REMOTEPAD_SESSION_PATH` | `<install>/tmp/session.json` | UI restore state file (a test instance points this elsewhere so it never shares state with the live app) |
 | `REMOTEPAD_ROOTS` | _(empty)_ | Extra allowed filesystem roots, colon-separated |
 | `REMOTEPAD_TEXT_LIMIT` | `8388608` | Max editable file size in bytes |
 | `REMOTEPAD_XIAOBA_PATH` | `../XiaoBa-CLI` (sibling of this repo) | Path to a built XiaoBa-CLI install used by the Agent panel |

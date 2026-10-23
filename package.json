@@ -7,13 +7,21 @@
     "dev": "pnpm --parallel --filter @remotepad/server --filter @remotepad/web dev",
     "dev:stable": "pnpm --parallel --filter @remotepad/server start --filter @remotepad/web dev",
     "build": "pnpm --filter @remotepad/shared build && pnpm --filter @remotepad/web build && pnpm --filter @remotepad/server build",
-    "start": "pnpm --filter @remotepad/server start"
+    "start": "pnpm --filter @remotepad/server start",
+    "test:e2e": "playwright test",
+    "test:e2e:headed": "playwright test --headed"
   },
   "engines": {
     "node": ">=20"
   },
   "packageManager": "pnpm@10.15.0",
   "pnpm": {
-    "onlyBuiltDependencies": ["esbuild", "node-pty"]
+    "onlyBuiltDependencies": [
+      "esbuild",
+      "node-pty"
+    ]
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.64.1"
   }
 }

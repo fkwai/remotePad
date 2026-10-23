@@ -61,7 +61,8 @@ UI regions (product names): **Sidebar** (left), **Editor** (middle top), **Termi
 | Host / ports | `settings.json` at install root (`host`, `port`, `uiPort`; env overrides) |
 | Agent model | `~/.remotepad/llm.json` (DeepSeek key + model + maxTokens; not in git). Host pop **Agent model** form. `GET/PUT /api/llm`. Default model `deepseek-flash` over OpenAI Chat Completions (`GAUZ_LLM_PROVIDER=openai`, `GAUZ_LLM_OPENAI_API_MODE=chat_completions`). Default max output tokens `32768` → `GAUZ_LLM_MAX_TOKENS`. Applied over XiaoBa `.env` on the next Agent message. |
 | Viewer modules | `packages/shared/src/modules.ts` catalog; enabled flags in `~/.remotepad/modules.json`; `GET/PUT /api/modules`; Host pop (computer name) toggles load/unload. Core is always code + folder + diff. Optional: markdown, json, jsonl, csv, image, html, log. Disabled types open as code. New modules should `defaultOn: false`. |
-| UI session restore | `tmp/session.json` under this repo |
+| UI session restore | `tmp/session.json` under this repo (`REMOTEPAD_SESSION_PATH` overrides) |
+| E2E click tests | `tests/e2e/*.spec.ts`, `playwright.config.ts`, harness in `tests/e2e/support/` |
 | Shared protocol | `packages/shared/src/index.ts` |
 | Install / LLM path | `apps/server/src/config.ts` (`repoRoot`, `xiaobaPath`) |
 | Plot sample | `samples/plotdemo/plotDemo.py` |
@@ -159,3 +160,5 @@ Work on a branch in this checkout when the user asks to persist. Never push `mai
 
 - Typecheck / build when the change warrants it (`pnpm` filters for `@remotepad/web` / `@remotepad/server`).
 - For UI: describe what to click. For Agent host: note that the server may need a restart.
+- Gesture changes: run `pnpm test:e2e` (Playwright, ~20s). It boots a throwaway instance on ports 3998/3999 with `HOME=.e2e/home`, `REMOTEPAD_SESSION_PATH=.e2e/session.json` and fixtures in `.e2e/work`, so the live app on 3847 is untouched. Add or fix a spec under `tests/e2e/` when you add a click/right-click behavior.
+- If a spec fails: `pnpm test:e2e:headed` to watch the click, or `npx playwright show-trace test-results/<spec>/trace.zip`.
