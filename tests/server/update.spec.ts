@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { expect, test } from '@playwright/test';
-import { applyUpdate, readUpdateStatus } from '../../apps/server/src/update.ts';
+import { applyUpdate, classifyChanges, readUpdateStatus } from '../../apps/server/src/update.ts';
 
 /**
  * The update button is only safe if the git plumbing refuses to lose work.
@@ -139,5 +139,26 @@ test.describe('git update module', () => {
     expect(result.ok).toBe(true);
     expect(result.updated).toBe(false);
     expect(result.message).toMatch(/up to date/i);
+  });
+});
+
+test.describe('change classification', () => {
+  test('maps a pulled range to install / build / restart work', () => {
+    expect(classifyChanges(['README.md'])).toMatchObject({
+      needsInstall: false, needsBuild: false, needsRestart: false,
+    });
+    expect(classifyChanges(['pnpm-lock.yaml', 'apps/web/src/App.tsx'])).toMatchObject({
+      needsInstall: true, needsBuild: true, needsRestart: false,
+    });
+    expect(classifyChanges(['apps/server/src/index.ts'])).toMatchObject({
+      needsInstall: false, needsBuild: false, needsRestart: true,
+    });
+    expect(classifyChanges(['packages/shared/src/index.ts'])).toMatchObject({
+      needsBuild: true, needsRestart: false,
+    });
+    // Blank lines from `git diff --name-only` must not trip the flags.
+    expect(classifyChanges(['', '  ', 'docs/x.md'])).toMatchObject({
+      files: ['docs/x.md'], needsInstall: false, needsBuild: false, needsRestart: false,
+    });
   });
 });

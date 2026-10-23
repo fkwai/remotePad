@@ -36,7 +36,10 @@ export function UpdateButton({ onToast }: { onToast: (msg: string) => void }) {
     try {
       const result = await api<UpdateResult>('/api/update', { method: 'POST' });
       onToast(result.message);
-      if (result.updated && !result.needsInstall) {
+      // Reload only when the new code is actually live: a dist-serving install
+      // needs a rebuild (done server-side) and server changes need a restart.
+      const mustRestart = Boolean(result.needsInstall || result.needsRestart);
+      if (result.updated && !mustRestart) {
         window.location.reload();
         return;
       }

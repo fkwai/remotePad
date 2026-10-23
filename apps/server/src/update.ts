@@ -6,6 +6,36 @@ const run = promisify(execFile);
 
 const INSTALL_FILES = ['package.json', 'pnpm-lock.yaml'];
 
+export interface ChangeImpact {
+  files: string[];
+  needsInstall: boolean;
+  /** Web sources changed: the served dist must be rebuilt. */
+  needsBuild: boolean;
+  /** Server sources changed: the process must restart. */
+  needsRestart: boolean;
+}
+
+/** What a pulled range implies for a running install. */
+export function classifyChanges(files: string[]): ChangeImpact {
+  const clean = files.map((file) => file.trim()).filter(Boolean);
+  return {
+    files: clean,
+    needsInstall: clean.some((file) => INSTALL_FILES.includes(file)),
+    needsBuild: clean.some((file) => file.startsWith('apps/web/') || file.startsWith('packages/shared/')),
+    needsRestart: clean.some((file) => file.startsWith('apps/server/')),
+  };
+}
+
+async function rebuildWeb(repo: string) {
+  const vite = `${repo}/apps/web/node_modules/.bin/vite`;
+  await run(vite, ['build'], {
+    cwd: `${repo}/apps/web`,
+    timeout: 180_000,
+    maxBuffer: 8 * 1024 * 1024,
+    env: { ...process.env, CI: '1' },
+  });
+}
+
 async function git(repo: string, args: string[], timeout = 20_000) {
   const { stdout } = await run('git', ['-C', repo, ...args], {
     timeout,
@@ -105,17 +135,35 @@ export async function applyUpdate(repo: string): Promise<UpdateResult> {
     await git(repo, ['merge', '--ff-only', `origin/${status.branch}`], 60_000);
     const after = await git(repo, ['rev-parse', 'HEAD']);
     const changed = await git(repo, ['diff', '--name-only', `${before}..${after}`]).catch(() => '');
-    const needsInstall = changed
-      .split('\n')
-      .some((file) => INSTALL_FILES.includes(file.trim()));
+    const impact = classifyChanges(changed.split('\n'));
+
+    // A dist-serving install would otherwise reload into the old bundle.
+    let built = false;
+    let buildError: string | undefined;
+    if (impact.needsBuild) {
+      try {
+        await rebuildWeb(repo);
+        built = true;
+      } catch (err) {
+        buildError = errorText(err);
+      }
+    }
+
+    const notes: string[] = [];
+    if (impact.needsInstall) notes.push('install dependencies');
+    if (impact.needsRestart) notes.push('restart RemotePad for server changes');
+    if (impact.needsBuild && !built) notes.push('rebuild the web app');
+
     return {
       ok: true,
       updated: before !== after,
       head: after,
-      needsInstall,
-      message: needsInstall
-        ? 'Updated. package.json / lockfile changed — install dependencies, then restart.'
-        : 'Updated.',
+      needsInstall: impact.needsInstall,
+      needsBuild: impact.needsBuild,
+      needsRestart: impact.needsRestart,
+      built,
+      buildError,
+      message: notes.length ? `Updated — ${notes.join(', ')}.` : 'Updated.',
       status: await readUpdateStatus(repo, { fetch: false }),
     };
   } catch (err) {

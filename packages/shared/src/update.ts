@@ -22,6 +22,13 @@ export interface UpdateResult {
   head?: string | null;
   /** package.json / lockfile changed — dependencies must be installed. */
   needsInstall?: boolean;
+  /** Web sources changed; the dist was rebuilt (or failed to). */
+  needsBuild?: boolean;
+  /** Server sources changed — the process must restart. */
+  needsRestart?: boolean;
+  /** Whether the automatic rebuild succeeded. */
+  built?: boolean;
+  buildError?: string;
   message: string;
   status?: UpdateStatus;
 }
