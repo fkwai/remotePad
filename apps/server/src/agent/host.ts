@@ -1284,10 +1284,20 @@ export class AgentHost {
       const summaries = await Promise.all(
         local.map(async (item) => ({ item, ...(await localConversationSummary(item.id)) })),
       );
-      conversations = summaries.map(({ item, title, preview }) => ({
+      // The panel groups by project id, so derive projects from the working
+      // directory each session ran in and keep the ids stable across refreshes.
+      const projectIds = new Map<string, number>();
+      for (const { project } of summaries) {
+        if (project && !projectIds.has(project)) projectIds.set(project, projectIds.size + 1);
+      }
+      projects.length = 0;
+      for (const [name, id] of projectIds) projects.push({ id, name });
+      conversations = summaries.map(({ item, title, preview, project }) => ({
         id: item.id,
         title,
         preview,
+        projectId: project ? projectIds.get(project) : undefined,
+        projectName: project || undefined,
         isGroup: item.id.startsWith('grp_'),
         isTask: false,
         updatedAt: item.updatedAt,
