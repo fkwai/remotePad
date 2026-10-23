@@ -158,18 +158,21 @@ Work on a branch in this checkout when the user asks to persist. Branch naming f
 
 ## Development (agents)
 
-This checkout is what the user is running. Do not edit it for feature work.
+This checkout runs the product for the user and must stay on `main` and clean —
+otherwise the update button greys out. Never edit it for feature work.
+
+Worktree → test → PR:
 
 1. `./scripts/dev-worktree.sh <feature>` → `helper/<feature>` worktree with `.dev/settings.json` (own ports) and its own `node_modules`. Override the location with `REMOTEPAD_WORKTREE_DIR`.
 2. Change code and add tests there. New behaviour gets a spec; a change inside an existing area extends that area's spec; only a genuinely independent surface gets a new file.
-3. Run the related spec (`npx playwright test tests/e2e/<area>.spec.ts` or `tests/server/...`), not the whole suite. Full suite before merge.
-4. `git push -u origin helper/<feature>`. Never push `main`, never force-push.
-5. `main` is the delivery channel: after review, merge the branch there. Every runtime then shows **Update N** and fast-forwards with one click; the endpoint refuses a dirty tree or local commits, so it cannot discard work.
+3. Run the related spec (`npx playwright test tests/e2e/<area>.spec.ts` or `tests/server/...`), not the whole suite. Full suite before the PR.
+4. `./scripts/pr.sh <feature>` pushes the branch and opens a PR against `main` (no `gh` → prints the compare URL; never push `main` from a worktree, never force-push).
+5. Merge the PR. `main` is the delivery channel: every runtime then shows **Update N** and fast-forwards with one click; the endpoint refuses a dirty tree or local commits, so it cannot discard work.
 
 ## Update button
 
 - `GET /api/update` → `UpdateStatus` (`behind`, `ahead`, `dirty`, `canUpdate`). Fetches at most once per 30s per repo.
-- `POST /api/update` → fast-forward only; reports `needsInstall` when `package.json`/`pnpm-lock.yaml` moved.
+- `POST /api/update` → fast-forward only. Classifies the pulled paths: web/shared rebuild the vite dist before the reload, server changes ask for a restart, `package.json`/`pnpm-lock.yaml` ask for an install.
 - Server module `apps/server/src/update.ts`; route `apps/server/src/routes/update.ts`; UI `apps/web/src/components/UpdateButton.tsx`.
 
 ## Grep / edit hygiene

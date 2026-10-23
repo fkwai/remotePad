@@ -66,6 +66,6 @@ targeted tests (run only what you touched):
   cd $WT && E2E_API_PORT=$E2E_API E2E_UI_PORT=$E2E_UI \\
     npx playwright test tests/e2e/editor-tabs.spec.ts
 
-when green:
-  git -C $WT push -u origin $BRANCH
+when green (targeted specs first, full suite before the PR):
+  $ROOT/scripts/pr.sh $NAME
 EOF

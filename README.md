@@ -123,26 +123,28 @@ worktrees can run their own suite at the same time.
 
 ## Development protocol
 
-The install at `/srv/remotepad` is what the user is running; every edit there is
-live. Do not develop in it.
+The install at `/srv/remotepad` is what the user is running, and it must stay on
+`main` and clean: a dirty tree or a local branch turns the update button grey.
+Every change goes worktree → test → pull request.
 
-1. **Work in a worktree.** `scripts/dev-worktree.sh <feature>` creates
-   `helper/<feature>` in an isolated directory with its own `settings.json`
-   (`.dev/`), its own ports and its own `node_modules`.
-2. **Write the test with the feature.** New behaviour adds a spec; touching an
-   existing area extends the spec that already covers it. Only genuinely
-   independent surfaces get a new file.
-3. **Run the related spec, not the world.** `npx playwright test tests/e2e/<area>.spec.ts`.
-   Run the full suite once before you ask for a merge.
-4. **Push the branch.** `git push -u origin helper/<feature>`. Never push `main`
-   from a feature branch.
-5. **Merge into `main` deliberately.** `main` is what runtimes update from.
+1. **Worktree.** `scripts/dev-worktree.sh <feature>` creates `helper/<feature>`
+   with `.dev/settings.json`, its own ports and its own `node_modules`.
+2. **Test with the feature.** New behaviour adds a spec; a change inside an
+   existing area extends that area's spec; only a genuinely independent surface
+   gets a new file.
+3. **Run the related spec, not the world.** `npx playwright test
+   tests/e2e/<area>.spec.ts` (or `tests/server/...`). Full suite before the PR.
+4. **Pull request.** `scripts/pr.sh <feature>` pushes the branch and opens a PR
+   against `main` (prints the compare URL when `gh` is unavailable).
+5. **Merge the PR.** `main` is the delivery channel; nothing lands there from a
+   worktree directly.
 6. **Runtimes pull with one click.** Every RemotePad polls `GET /api/update` and
-   shows **Update N** in the top bar when `origin/main` has commits it does not.
-   The button fast-forwards (`POST /api/update`) and reloads; it refuses when the
-   tree is dirty or the branch has local commits, so it can never discard work.
-   When `package.json`/`pnpm-lock.yaml` moved it reports that dependencies must be
-   installed instead of reloading into a broken build.
+   shows **Update N** next to the RemotePad wordmark when `origin/main` has
+   commits it does not. The button fast-forwards (`POST /api/update`) and
+   reloads; it refuses when the tree is dirty or the branch has local commits, so
+   it can never discard work. When `package.json`/`pnpm-lock.yaml` moved it asks
+   for an install instead of reloading into a broken build; web changes are
+   rebuilt before the reload; server changes ask for a restart.
 
 ## Access
 
