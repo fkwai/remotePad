@@ -1,4 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
+import {
+  clearCopied, copiedSelection, expandDraft, makeRef, parseWire, type AgentRef,
+} from '../agentRefs';
 import type { AgentBackend, AgentCatsCoConversation, AgentCatsCoList, AgentChange, AgentSessionInfo, AgentStatus } from '@remotepad/shared';
 import { isHelperSessionId } from '@remotepad/shared';
 import { basename } from '../files';
@@ -105,7 +110,7 @@ export function AgentPanel({
   /** Stick to the newest message until the reader scrolls up. Starts true so the
    *  first history load (local or CatsCo) lands at the bottom, not at the top. */
   const stick = useRef(true);
-  const [chips, setChips] = useState<Record<string, { path: string; name: string }[]>>({});
+  const [refs, setRefs] = useState<Record<string, AgentRef[]>>({});
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [tabMenu, setTabMenu] = useState<{ x: number; y: number; id: string } | null>(null);
   const [sessionMenu, setSessionMenu] = useState<{ x: number; y: number; id: string } | null>(null);
@@ -123,7 +128,7 @@ export function AgentPanel({
     : undefined;
   const busy = state === 'running' || Boolean(activeConversation?.working) || Boolean(switching);
   const activeId = sessionId ?? '';
-  const activeChips = chips[activeId] ?? [];
+  const activeRefs = refs[activeId] ?? [];
   const draft = drafts[activeId] ?? '';
   const catscoBots = catscoList?.bots ?? [];
   const catscoProjects = catscoList?.projects ?? [];
@@ -306,15 +311,6 @@ export function AgentPanel({
   }, [turns]);
   const allToolsOpen = allToolIds.length > 0 && allToolIds.every((id) => openTools.has(id));
 
-  function addChip(path: string, name?: string) {
-    const label = name || basename(path);
-    setChips((prev) => {
-      const cur = prev[activeId] ?? [];
-      if (cur.some((item) => item.path === path)) return prev;
-      return { ...prev, [activeId]: [...cur, { path, name: label }] };
-    });
-  }
-
   function jumpToBottom() {
     const node = logRef.current;
     if (node) node.scrollTo({ top: node.scrollHeight, behavior: 'smooth' });
@@ -325,14 +321,37 @@ export function AgentPanel({
   }
 
   function submit() {
-    const chipBlock = activeChips.map((item) => item.path).join('\n');
-    const body = [chipBlock, draft].filter((part) => part.trim()).join('\n\n');
+    const body = expandDraft(draft, activeRefs);
     if (!body.trim() || busy) return;
     pinBottom.current = true;
     onSend(body);
     setDrafts((prev) => ({ ...prev, [activeId]: '' }));
-    setChips((prev) => ({ ...prev, [activeId]: [] }));
+    setRefs((prev) => ({ ...prev, [activeId]: [] }));
     requestAnimationFrame(() => inputRef.current?.focus());
+  }
+
+  /** Insert a token at the caret so the draft reads like prose. */
+  function insertToken(token: string) {
+    const el = inputRef.current;
+    const cur = draft;
+    const start = el?.selectionStart ?? cur.length;
+    const end = el?.selectionEnd ?? cur.length;
+    const before = cur.slice(0, start);
+    const after = cur.slice(end);
+    const lead = before && !/\s$/.test(before) ? ' ' : '';
+    const next = `${before}${lead}@${token} ${after}`;
+    setDrafts((prev) => ({ ...prev, [activeId]: next }));
+    const caret = (before + lead + '@' + token + ' ').length;
+    requestAnimationFrame(() => {
+      el?.focus();
+      el?.setSelectionRange(caret, caret);
+    });
+  }
+
+  function addRef(input: { path: string; text?: string; startLine?: number; endLine?: number; lang?: string; kind?: 'file' | 'dir' }) {
+    const ref = makeRef({ ...input, taken: activeRefs.map((item) => item.token) });
+    setRefs((prev) => ({ ...prev, [activeId]: [...(prev[activeId] ?? []), ref] }));
+    insertToken(ref.token);
   }
 
   function commitRename() {
@@ -595,13 +614,31 @@ export function AgentPanel({
             {turn.role === 'user' && (
               <div className="agent-msg user">
                 <div className="agent-msg-role">You</div>
-                <div className="agent-msg-body">{turn.text}</div>
+                <div className="agent-msg-body">
+                  {parseWire(turn.text).map((part, i) => (
+                    part.kind === 'text'
+                      ? <span key={i} className="agent-msg-text">{part.text}</span>
+                      : (
+                        <span key={i} className="agent-ref-wrap">
+                          <span className="agent-ref" title={part.path}>{part.dir ? '/' : ''}{part.label}</span>
+                          {part.code !== undefined && (
+                            <details className="agent-ref-code">
+                              <summary>{part.code.split('\n').length} lines</summary>
+                              <pre>{part.code}</pre>
+                            </details>
+                          )}
+                        </span>
+                      )
+                  ))}
+                </div>
               </div>
             )}
             {turn.role === 'assistant' && (
               <div className="agent-msg assistant">
                 <div className="agent-msg-role">{catsco ? 'CatsCo' : 'Agent'}</div>
-                <div className="agent-msg-body">{turn.text}</div>
+                <div className="agent-msg-body agent-md">
+                  <ReactMarkdown remarkPlugins={[remarkGfm]}>{turn.text}</ReactMarkdown>
+                </div>
               </div>
             )}
             {turn.role === 'status' && (
@@ -743,40 +780,11 @@ export function AgentPanel({
           const entry = readEntryDrag(e);
           if (!entry) return;
           e.preventDefault();
-          addChip(entry.path, entry.name);
+          // Inline token, not a chip row: the path lands where the caret is and
+          // is expanded to the absolute path only on send.
+          addRef({ path: entry.path, kind: entry.kind });
         }}
       >
-        {activeChips.length > 0 && (
-          <div className="agent-chips">
-            {activeChips.map((chip) => (
-              <a
-                key={chip.path}
-                className="agent-chip"
-                href={chip.path}
-                title={chip.path}
-                onClick={(e) => {
-                  e.preventDefault();
-                  void navigator.clipboard.writeText(chip.path);
-                }}
-              >
-                <span className="agent-chip-name">{chip.name}</span>
-                <button
-                  type="button"
-                  className="ghost"
-                  aria-label={`Remove ${chip.name}`}
-                  onClick={(e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    setChips((prev) => {
-                      const cur = prev[activeId] ?? [];
-                      return { ...prev, [activeId]: cur.filter((item) => item.path !== chip.path) };
-                    });
-                  }}
-                >×</button>
-              </a>
-            ))}
-          </div>
-        )}
         <textarea
           ref={inputRef}
           rows={3}
@@ -788,7 +796,7 @@ export function AgentPanel({
               ? 'Switching session…'
               : busy
               ? (catsco ? `${catscoBotName} is working… wait for the answer` : 'Agent is working… (Enter queues after stop)')
-              : catsco ? 'Message CatsCo cloud · drop files as chips' : 'Message local XiaoBa · drop files as chips'
+              : catsco ? 'Message CatsCo cloud · drop files or paste a selection' : 'Message local XiaoBa · drop files or paste a selection'
           }
           onDragOver={(e) => {
             if (hasEntryDrag(e)) e.preventDefault();
@@ -797,7 +805,16 @@ export function AgentPanel({
             const entry = readEntryDrag(e);
             if (!entry) return;
             e.preventDefault();
-            addChip(entry.path, entry.name);
+            addRef({ path: entry.path, kind: entry.kind });
+          }}
+          onPaste={(e) => {
+            const selection = copiedSelection();
+            const text = e.clipboardData.getData('text/plain');
+            if (!selection || !text) return;
+            if (text.replace(/\n$/, '') !== selection.text.replace(/\n$/, '')) return;
+            e.preventDefault();
+            addRef(selection);
+            clearCopied();
           }}
           onKeyDown={(e) => {
             if (e.key === 'Enter' && !e.shiftKey) {
@@ -811,7 +828,7 @@ export function AgentPanel({
           <button
             className="ghost"
             onClick={() => {
-              setChips((prev) => ({ ...prev, [activeId]: [] }));
+              setRefs((prev) => ({ ...prev, [activeId]: [] }));
               onClear();
             }}
             disabled={busy}

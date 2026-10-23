@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { rememberCopy } from '../agentRefs';
 import Editor from '@monaco-editor/react';
 import type { OnMount } from '@monaco-editor/react';
 import type { ViewerKind } from '../files';
@@ -110,6 +111,10 @@ export function EditorArea({
   const tabsRef = useRef<HTMLDivElement>(null);
   const measureRef = useRef<HTMLDivElement>(null);
   const edRef = useRef<Parameters<OnMount>[0] | null>(null);
+  // The copy handler is registered once per Monaco instance; read the live tab
+  // through a ref so it can never label a selection with another file's path.
+  const activeTabRef = useRef(tab);
+  activeTabRef.current = tab;
   const [viewInfo, setViewInfo] = useState<string | null>(null);
 
   useEffect(() => {
@@ -360,8 +365,33 @@ export function EditorArea({
                           setEdMenu({ x: ev.clientX, y: ev.clientY });
                         };
                         node.addEventListener('contextmenu', onMenu);
+                        const onCopy = () => {
+                          const current = activeTabRef.current;
+                          const selection = editor.getSelection();
+                          const model = editor.getModel();
+                          if (!current || !selection || !model || selection.isEmpty()) return;
+                          rememberCopy({
+                            path: current.path,
+                            text: model.getValueInRange(selection),
+                            startLine: selection.startLineNumber,
+                            endLine: selection.endLineNumber,
+                            lang: model.getLanguageId(),
+                          });
+                        };
+                        node.addEventListener('copy', onCopy);
+                        // Monaco copies through a hidden textarea, so the DOM
+                        // 'copy' event sometimes targets a node outside the
+                        // editor. Observing the keydown catches Ctrl/Cmd+C
+                        // without overriding Monaco's own copy.
+                        const recordSelection = () => onCopy();
+                        const keySub = editor.onKeyDown((e) => {
+                          const isCopy = (e.ctrlKey || e.metaKey) && e.keyCode === monaco.KeyCode.KeyC;
+                          if (isCopy) recordSelection();
+                        });
+                        editor.onDidDispose(() => keySub.dispose());
                         editor.onDidDispose(() => {
                           node.removeEventListener('contextmenu', onMenu);
+                          node.removeEventListener('copy', onCopy);
                           if (edRef.current === editor) edRef.current = null;
                         });
                       }
