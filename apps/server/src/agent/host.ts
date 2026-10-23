@@ -1142,6 +1142,9 @@ export class AgentHost {
 
   /** Poll the cloud task state so the panel can disable Send while the agent runs. */
   private startCatsCoListPoller(): void {
+    // Local-only: there is no cloud list to poll, and an empty reply would
+    // overwrite the conversation list built from the session files.
+    if (config.catscoLocalOnly) return;
     if (this.catscoListTimer) return;
     this.catscoListTimer = setInterval(() => { void this.pollCatsCoState(); }, 2500);
     this.catscoListTimer.unref?.();
@@ -1154,6 +1157,10 @@ export class AgentHost {
   }
 
   private async pollCatsCoState(): Promise<void> {
+    if (config.catscoLocalOnly) {
+      this.stopCatsCoListPoller();
+      return;
+    }
     if (this.backend !== 'catsco') {
       this.stopCatsCoListPoller();
       return;
