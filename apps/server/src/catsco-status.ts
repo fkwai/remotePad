@@ -21,6 +21,19 @@ type DashCatsStatus = {
  * Does not start or stop the connector. Never returns tokens.
  */
 export async function readCatsCoStatus(): Promise<CatsCoStatusView> {
+  if (config.catscoLocalOnly) {
+    // No Dashboard on this machine by design; the panel reads local session files.
+    return {
+      state: 'online',
+      summary: 'Attached to the agent on this machine (local session files)',
+      dashboardReachable: false,
+      dashboardUrl: '',
+      appUrl: 'https://app.catsco.cc',
+      accountOk: true,
+      connectorReady: true,
+      serviceRunning: true,
+    };
+  }
   const dashboardUrl = config.catscoDashboardUrl.replace(/\/$/, '');
   const appUrl = 'https://app.catsco.cc';
   const base: CatsCoStatusView = {

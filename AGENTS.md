@@ -2,7 +2,9 @@
 
 RemotePad is the browser UI (files, editor, terminal, agent chat). It does not own the agent runtime. XiaoBa-CLI is a separate tree (`REMOTEPAD_XIAOBA_PATH`, default sibling `../XiaoBa-CLI`). CatsCo maintains that runtime. This repo only embeds it.
 
-There is no Helper agent in the current product. Do not add a worktree, a second port, or a merge-back-into-this-install flow. Agent sessions (`rp-*`) edit the selected repo, not RemotePad. Code under `helper-worktree.ts` is leftover; the Agent panel no longer shows Commit & push / Preview / Merge → main — do not bring those buttons back.
+There is no Helper agent in the current product. Agent sessions (`rp-*`) edit the selected repo, not RemotePad. Code under `helper-worktree.ts` is leftover; the Agent panel no longer shows Commit & push / Preview / Merge → main — do not bring those buttons back.
+
+Development is separate from those product flows: a developer/agent works in a git **worktree**, and a running install pulls from `origin/main` through the top-bar **Update N** button (`GET/POST /api/update`). The worktree is not a product feature and must stay out of the UI.
 
 ## Mission
 
@@ -61,7 +63,9 @@ UI regions (product names): **Sidebar** (left), **Editor** (middle top), **Termi
 | Host / ports | `settings.json` at install root (`host`, `port`, `uiPort`; env overrides) |
 | Agent model | `~/.remotepad/llm.json` (DeepSeek key + model + maxTokens; not in git). Host pop **Agent model** form. `GET/PUT /api/llm`. Default model `deepseek-flash` over OpenAI Chat Completions (`GAUZ_LLM_PROVIDER=openai`, `GAUZ_LLM_OPENAI_API_MODE=chat_completions`). Default max output tokens `32768` → `GAUZ_LLM_MAX_TOKENS`. Applied over XiaoBa `.env` on the next Agent message. |
 | Viewer modules | `packages/shared/src/modules.ts` catalog; enabled flags in `~/.remotepad/modules.json`; `GET/PUT /api/modules`; Host pop (computer name) toggles load/unload. Core is always code + folder + diff. Optional: markdown, json, jsonl, csv, image, html, log. Disabled types open as code. New modules should `defaultOn: false`. |
-| UI session restore | `tmp/session.json` under this repo |
+| UI session restore | `tmp/session.json` under this repo (`REMOTEPAD_SESSION_PATH` overrides) |
+| Update check / one-click pull | `apps/server/src/update.ts`, `routes/update.ts`, `apps/web/src/components/UpdateButton.tsx` |
+| E2E click tests | `tests/e2e/*.spec.ts` (per area), `tests/server/*.spec.ts` (node modules), harness in `tests/e2e/support/` |
 | Shared protocol | `packages/shared/src/index.ts` |
 | Install / LLM path | `apps/server/src/config.ts` (`repoRoot`, `xiaobaPath`) |
 | Plot sample | `samples/plotdemo/plotDemo.py` |
@@ -147,7 +151,24 @@ If a job is about click / double-click / reveal / scroll, read this table first.
 
 ## Git
 
-Work on a branch in this checkout when the user asks to persist. Never push `main`. Never force-push.
+Work on a branch in this checkout when the user asks to persist. Branch naming for feature work: `helper/<feature>` from `scripts/dev-worktree.sh`. Never push `main`, never force-push.
+
+
+## Development (agents)
+
+This checkout is what the user is running. Do not edit it for feature work.
+
+1. `./scripts/dev-worktree.sh <feature>` → `helper/<feature>` worktree with `.dev/settings.json` (own ports) and its own `node_modules`. Override the location with `REMOTEPAD_WORKTREE_DIR`.
+2. Change code and add tests there. New behaviour gets a spec; a change inside an existing area extends that area's spec; only a genuinely independent surface gets a new file.
+3. Run the related spec (`npx playwright test tests/e2e/<area>.spec.ts` or `tests/server/...`), not the whole suite. Full suite before merge.
+4. `git push -u origin helper/<feature>`. Never push `main`, never force-push.
+5. `main` is the delivery channel: after review, merge the branch there. Every runtime then shows **Update N** and fast-forwards with one click; the endpoint refuses a dirty tree or local commits, so it cannot discard work.
+
+## Update button
+
+- `GET /api/update` → `UpdateStatus` (`behind`, `ahead`, `dirty`, `canUpdate`). Fetches at most once per 30s per repo.
+- `POST /api/update` → fast-forward only; reports `needsInstall` when `package.json`/`pnpm-lock.yaml` moved.
+- Server module `apps/server/src/update.ts`; route `apps/server/src/routes/update.ts`; UI `apps/web/src/components/UpdateButton.tsx`.
 
 ## Grep / edit hygiene
 
@@ -159,3 +180,6 @@ Work on a branch in this checkout when the user asks to persist. Never push `mai
 
 - Typecheck / build when the change warrants it (`pnpm` filters for `@remotepad/web` / `@remotepad/server`).
 - For UI: describe what to click. For Agent host: note that the server may need a restart.
+- Run the spec for the area you touched (`npx playwright test tests/e2e/<area>.spec.ts`, or `tests/server/...` for node modules); run the full suite before merge. The suite boots a throwaway instance on ports 3998/3999 (override with `E2E_API_PORT`/`E2E_UI_PORT`) with `HOME=.e2e/home`, `REMOTEPAD_SESSION_PATH=.e2e/session.json` and fixtures in `.e2e/work`, so the live app on 3847 is untouched.
+- Gesture changes: add or fix a spec under `tests/e2e/`. Independent feature → new file; related behaviour → extend the existing file.
+- If a spec fails: `pnpm test:e2e:headed` to watch the click, or `npx playwright show-trace test-results/<spec>/trace.zip`.

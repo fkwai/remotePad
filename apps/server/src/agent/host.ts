@@ -1283,6 +1283,9 @@ export class AgentHost {
 
   /** Poll the cloud task state so the panel can disable Send while the agent runs. */
   private startCatsCoListPoller(): void {
+    // Local-only: there is no cloud list to poll, and an empty reply would
+    // overwrite the conversation list built from the session files.
+    if (config.catscoLocalOnly) return;
     if (this.catscoListTimer) return;
     this.catscoListTimer = setInterval(() => { void this.pollCatsCoState(); }, 2500);
     this.catscoListTimer.unref?.();
@@ -1295,6 +1298,10 @@ export class AgentHost {
   }
 
   private async pollCatsCoState(): Promise<void> {
+    if (config.catscoLocalOnly) {
+      this.stopCatsCoListPoller();
+      return;
+    }
     if (this.backend !== 'catsco') {
       this.stopCatsCoListPoller();
       return;
@@ -1413,15 +1420,33 @@ export class AgentHost {
     let conversations: CatsCoConversation[] = settled[2].status === 'fulfilled'
       ? settled[2].value
       : [];
+    // Projects only exist in the cloud rows; the app groups by exactly these.
+    if (projects.length === 0) {
+      const seen = new Map<number, string>();
+      for (const item of conversations) {
+        if (item.projectId && item.projectName) seen.set(item.projectId, item.projectName);
+      }
+      for (const [id, name] of seen) projects.push({ id, name });
+    }
     if (conversations.length === 0) {
       const local = listLocalConversations();
       const summaries = await Promise.all(
         local.map(async (item) => ({ item, ...(await localConversationSummary(item.id)) })),
       );
-      conversations = summaries.map(({ item, title, preview }) => ({
+      // The panel groups by project id, so derive projects from the working
+      // directory each session ran in and keep the ids stable across refreshes.
+      const projectIds = new Map<string, number>();
+      for (const { project } of summaries) {
+        if (project && !projectIds.has(project)) projectIds.set(project, projectIds.size + 1);
+      }
+      projects.length = 0;
+      for (const [name, id] of projectIds) projects.push({ id, name });
+      conversations = summaries.map(({ item, title, preview, project }) => ({
         id: item.id,
         title,
         preview,
+        projectId: project ? projectIds.get(project) : undefined,
+        projectName: project || undefined,
         isGroup: item.id.startsWith('grp_'),
         isTask: false,
         updatedAt: item.updatedAt,

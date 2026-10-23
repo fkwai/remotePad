@@ -73,6 +73,77 @@ pnpm start
 
 `pnpm start` serves the built UI from the Fastify process on port 3847.
 
+## Tests
+
+End-to-end tests drive the real UI in Chromium (clicks, right-click menus, address bar, terminal) against a throwaway instance of the app.
+
+```bash
+pnpm install
+npx playwright install chromium   # first time only
+pnpm test:e2e                     # headless, ~22s, 32 tests
+pnpm test:e2e:headed              # watch the clicks
+```
+
+The suite lives in `tests/e2e/` and is configured by `playwright.config.ts`. It is isolated from your working install:
+
+| Shared resource | Test instance |
+| --- | --- |
+| API / UI ports | `3999` (Fastify) + `3998` (Vite dev), from `.e2e/settings.json` |
+| `$HOME` | `.e2e/home`, so `~/.remotepad` (favorites, repos, plots, agent sessions) is never touched |
+| `tmp/session.json` | `.e2e/session.json` via `REMOTEPAD_SESSION_PATH` |
+| Fixtures | `.e2e/work` (`a.md`, `b.csv`, `notes.txt`, `sub/`) |
+
+`.e2e/` is recreated on every run and is gitignored. Tests never write to your own RemotePad state, so a live instance on 3847 can keep running while the suite executes.
+
+### What each spec covers
+
+| Spec | Area |
+| --- | --- |
+| `tests/e2e/shell.spec.ts` | shell regions, terminal toggle, real pty round-trip, cold-start default |
+| `tests/e2e/sidebar-tree.spec.ts` | tree expand/collapse, Explorer, `...` up, file click |
+| `tests/e2e/editor-tabs.spec.ts` | temp tab replacement, pinning, close, tab menu |
+| `tests/e2e/address-bar.spec.ts` | Enter on dir/file, missing path, Escape |
+| `tests/e2e/context-menus.spec.ts` | menu actions and the hint contract |
+| `tests/e2e/update-button.spec.ts` | behind/ahead/dirty states of the update button |
+| `tests/server/update.spec.ts` | real git fast-forward, dirty/ahead refusals, install flag |
+
+Run only the area you touched:
+
+```bash
+pnpm test:e2e tests/e2e/editor-tabs.spec.ts        # one spec
+pnpm test:e2e tests/e2e                          # UI gestures
+pnpm test:e2e tests/server                       # node modules (fast)
+pnpm test:e2e                                    # everything, before merge
+```
+
+Ports are env-driven (`E2E_API_PORT`, `E2E_UI_PORT`, default 3999/3998) so several
+worktrees can run their own suite at the same time.
+
+
+
+## Development protocol
+
+The install at `/srv/remotepad` is what the user is running; every edit there is
+live. Do not develop in it.
+
+1. **Work in a worktree.** `scripts/dev-worktree.sh <feature>` creates
+   `helper/<feature>` in an isolated directory with its own `settings.json`
+   (`.dev/`), its own ports and its own `node_modules`.
+2. **Write the test with the feature.** New behaviour adds a spec; touching an
+   existing area extends the spec that already covers it. Only genuinely
+   independent surfaces get a new file.
+3. **Run the related spec, not the world.** `npx playwright test tests/e2e/<area>.spec.ts`.
+   Run the full suite once before you ask for a merge.
+4. **Push the branch.** `git push -u origin helper/<feature>`. Never push `main`
+   from a feature branch.
+5. **Merge into `main` deliberately.** `main` is what runtimes update from.
+6. **Runtimes pull with one click.** Every RemotePad polls `GET /api/update` and
+   shows **Update N** in the top bar when `origin/main` has commits it does not.
+   The button fast-forwards (`POST /api/update`) and reloads; it refuses when the
+   tree is dirty or the branch has local commits, so it can never discard work.
+   When `package.json`/`pnpm-lock.yaml` moved it reports that dependencies must be
+   installed instead of reloading into a broken build.
+
 ## Access
 
 RemotePad listens on localhost on the machine where it runs. There is no authentication — do not expose it to the public internet.
@@ -170,6 +241,7 @@ Repo `settings.json`: `host`, `port` (API / prod UI), `uiPort` (Vite dev only). 
 | `REMOTEPAD_PORT` | `settings.json` → `3847` | Backend port |
 | `REMOTEPAD_UI_PORT` | `settings.json` → `5173` | Vite dev UI port |
 | `REMOTEPAD_SETTINGS` | `<install>/settings.json` | Path to settings file |
+| `REMOTEPAD_SESSION_PATH` | `<install>/tmp/session.json` | UI restore state file (a test instance points this elsewhere so it never shares state with the live app) |
 | `REMOTEPAD_ROOTS` | _(empty)_ | Extra allowed filesystem roots, colon-separated |
 | `REMOTEPAD_TEXT_LIMIT` | `8388608` | Max editable file size in bytes |
 | `REMOTEPAD_XIAOBA_PATH` | `../XiaoBa-CLI` (sibling of this repo) | Path to a built XiaoBa-CLI install used by the Agent panel |
@@ -192,6 +264,7 @@ Click **RemotePad** in the top-left for the full help list. Common shortcuts (al
 - Drag paths into Editor / Terminal / Agent
 - Favorites & repos: right-click for explorer, startup, terminal, remove; drag to reorder
 - Click the computer name for host / git / terminals
+- Top bar **Update N** — `origin/main` has N commits this install does not; one click fast-forwards and reloads (it refuses a dirty tree or local commits, and rebuilds the web bundle when UI code moved)
 
 Favorites are stored in `~/.remotepad/favorites.json`. Home is pinned by default.
 

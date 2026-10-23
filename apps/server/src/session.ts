@@ -3,7 +3,10 @@ import path from 'node:path';
 import type { SessionState } from '@remotepad/shared';
 import { config } from './config.ts';
 
-export const SESSION_PATH = path.join(config.repoRoot, 'tmp', 'session.json');
+// Overridable so a test instance can keep its own UI restore state instead of
+// sharing tmp/session.json with the live app on the same install.
+export const SESSION_PATH = process.env.REMOTEPAD_SESSION_PATH
+  || path.join(config.repoRoot, 'tmp', 'session.json');
 
 const EMPTY: SessionState = {
   repoPath: null,
@@ -13,7 +16,7 @@ const EMPTY: SessionState = {
   tabs: [],
   activePath: null,
   sideTab: 'favorites',
-  termOpen: false,
+  termOpen: true,
   rightTab: 'agent',
 };
 
@@ -51,7 +54,9 @@ function asState(raw: unknown): SessionState {
     tabs,
     activePath: typeof item.activePath === 'string' ? item.activePath : null,
     sideTab,
-    termOpen: item.termOpen === true,
+    // Absent state means "never chosen", which opens the terminal (README/AGENTS);
+    // an explicit false is a user choice and stays closed.
+    termOpen: item.termOpen !== false,
     rightTab: 'agent',
   };
 }

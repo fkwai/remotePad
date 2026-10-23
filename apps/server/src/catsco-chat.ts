@@ -1,5 +1,13 @@
 import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
 import { config } from './config.ts';
+
+/** This deployment has no Dashboard: the agent's own files are the source.
+ *  Every caller below short-circuits so nothing ever dials loopback 3800. */
+function localOnly(): boolean {
+  return config.catscoLocalOnly;
+}
 
 export type CatsCoChatTarget = {
   ready: boolean;
@@ -74,6 +82,18 @@ async function dashPost<T>(path: string, payload: unknown, timeoutMs = 20000): P
 
 /** Resolve the user↔cloud-bot p2p topic via the running XiaoBa Dashboard. */
 export async function resolveCatsCoChatTarget(): Promise<CatsCoChatTarget> {
+  if (localOnly()) {
+    return {
+      ready: true,
+      dashboardUrl: '',
+      appUrl: 'https://app.catsco.cc',
+      userUid: '',
+      userName: '',
+      botUid: '',
+      botName: 'local',
+      topicId: '',
+    };
+  }
   const dashboardUrl = dashBase();
   const base: CatsCoChatTarget = {
     ready: false,
@@ -161,6 +181,9 @@ export async function fetchCatsCoMessages(
 }
 
 export async function sendCatsCoMessage(topicId: string, content: string): Promise<{ id: number }> {
+  if (localOnly()) {
+    throw new Error('This remotePad is attached to the agent on this machine. Send from the CatsCo app, or switch the panel to Local.');
+  }
   const data = await dashPost<{ id?: number; seq_id?: number }>(
     '/api/cats/messages/send',
     { topic_id: topicId, content },
@@ -267,6 +290,7 @@ export type CatsCoConversation = {
 
 /** Bots owned by the signed-in CatsCo user. */
 export async function listCatsCoBots(): Promise<CatsCoBot[]> {
+  if (localOnly()) return [];
   const data = await dashGet<{ bots?: Array<Record<string, unknown>> }>('/api/cats/bots');
   const list = Array.isArray(data.bots) ? data.bots : [];
   return list.map((bot) => {
@@ -287,6 +311,7 @@ export async function switchCatsCoBot(botUid: string): Promise<{ topicId?: strin
 }
 
 export async function listCatsCoProjects(): Promise<CatsCoProject[]> {
+  if (localOnly()) return [];
   const data = await dashGet<{ projects?: Array<Record<string, unknown>> }>('/api/cats/projects');
   const list = Array.isArray(data.projects) ? data.projects : [];
   return list.map((project) => ({
@@ -305,9 +330,51 @@ export async function createCatsCoProject(name: string): Promise<CatsCoProject> 
 }
 
 /** Every conversation the account can see: p2p chats, groups, agent tasks. */
+/** Account token and cloud base, read straight from the CLI's own config file.
+ *
+ * The Dashboard proxy is unavailable on the machine that runs the agent, but the
+ * account it runs as already holds a token, so the panel can ask the cloud for
+ * the same list the app shows — with the names the app displays.
+ */
+async function cloudAccount(): Promise<{ base: string; token: string } | null> {
+  try {
+    const raw = await fs.readFile(directConfigPath(), 'utf8');
+    const saved = JSON.parse(raw) as {
+      account?: { token?: string };
+      endpoints?: { httpBaseUrl?: string };
+    };
+    const base = String(saved?.endpoints?.httpBaseUrl || '').replace(/\/$/, '');
+    const token = String(saved?.account?.token || '').trim();
+    return base && token ? { base, token } : null;
+  } catch {
+    return null;
+  }
+}
+
+function directConfigPath(): string {
+  return process.env.CATSCO_CONFIG_FILE
+    || path.join(os.homedir(), '.xiaoba', 'catsco.json');
+}
+
+/** Same rows the Dashboard would proxy, fetched directly from the cloud. */
+async function cloudConversations(): Promise<Array<Record<string, unknown>>> {
+  const auth = await cloudAccount();
+  if (!auth) throw new Error('No CatsCo account token on this machine.');
+  const res = await fetch(`${auth.base}/api/conversations`, {
+    headers: { authorization: `Bearer ${auth.token}` },
+    signal: AbortSignal.timeout(20_000),
+  });
+  if (!res.ok) throw new Error(`CatsCo conversations: HTTP ${res.status}`);
+  const data = (await res.json()) as { conversations?: Array<Record<string, unknown>> };
+  return Array.isArray(data.conversations) ? data.conversations : [];
+}
+
 export async function listCatsCoConversations(): Promise<CatsCoConversation[]> {
-  const data = await dashGet<{ conversations?: Array<Record<string, unknown>> }>('/api/cats/conversations');
-  const list = Array.isArray(data.conversations) ? data.conversations : [];
+  // Local-only deployments skip the Dashboard but not the cloud: the names and
+  // projects only exist there.
+  const list = localOnly()
+    ? await cloudConversations()
+    : (await dashGet<{ conversations?: Array<Record<string, unknown>> }>('/api/cats/conversations')).conversations || [];
   return list.map((item) => {
     const id = String(item.id || '');
     const projectId = Number(item.project_id ?? 0);

@@ -17,3 +17,12 @@ samples/plotdemo/latest.png
 
 # pnpm keeps its content-addressable store here when HOME is not writable
 /.pnpm-store/
+
+# e2e harness state (isolated HOME, fixtures, settings)
+.e2e/
+test-results/
+playwright-report/
+
+# per-worktree local settings (scripts/dev-worktree.sh)
+.dev/
+.worktrees/

@@ -30,7 +30,14 @@ export const config = {
   pluginsDir: path.join(installRoot, 'plugins'),
   xiaobaPath: path.resolve(process.env.REMOTEPAD_XIAOBA_PATH || path.join(installRoot, '..', 'XiaoBa-CLI')),
   xiaobaDataDir: path.join(os.homedir(), '.remotepad', 'xiaoba'),
-  /** Session files written by the agent on this machine.
+  /** Deployment variant: read the agent's own files, never the Dashboard.
+   *
+   * The machine that runs the agent has no Dashboard (the agent *is* the
+   * connector there), so the panel is served entirely from session files. Set
+   * REMOTEPAD_CATSCO_LOCAL=1 there and leave it unset everywhere else.
+   */
+  catscoLocalOnly: /^(1|true|yes)$/i.test(String(process.env.REMOTEPAD_CATSCO_LOCAL || '').trim()),
+  /** Session files written by the agent on this machine.**
    *
    * The agent runs under this same user, so its transcript is a local file we
    * can read and tail. That removes the Dashboard from the transcript path

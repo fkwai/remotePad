@@ -9,6 +9,7 @@ import { browserPadUrl, hasEntryDrag, readEntryDrag } from './dnd';
 import { LeftSidebar, type SideTab } from './components/LeftSidebar';
 import { EditorArea, type OpenTab } from './components/EditorArea';
 import { TerminalPanel } from './components/TerminalPanel';
+import { UpdateButton } from './components/UpdateButton';
 import { RightDock } from './components/RightDock';
 import { TextClipMenu } from './components/ContextMenu';
 import { HelpPop, HostPop } from './components/Popovers';
@@ -1343,6 +1344,7 @@ export function App() {
           onClick={() => setTermOpen((v) => !v)}
         >Terminal</button>
         )}
+        <UpdateButton onToast={showToast} />
         {machine && (
           <button
             type="button"

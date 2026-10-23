@@ -244,17 +244,46 @@ export function listLocalConversations(limit = 60): LocalConversation[] {
   return out.slice(0, limit);
 }
 
-/** Title and preview for one conversation, read from the head of its file. */
-export async function localConversationSummary(topic: string): Promise<{ title: string; preview: string }> {
+/** Where the agent was working, which is what the CatsCo app files by.
+ *
+ * The state file keeps the session file's full name (`cc_group_grp_1.jsonl` →
+ * `cc_group_grp_1.json`), not the bare topic, so derive it from the session.
+ */
+function sessionProject(sessionFile: string): string {
+  const base = path.basename(sessionFile).replace(/\.jsonl$/i, '');
+  const file = path.join(config.agentSessionsDir, '..', 'session-state', `${base}.json`);
+  try {
+    const raw = JSON.parse(fs.readFileSync(file, 'utf8')) as { currentDirectory?: string };
+    const dir = String(raw.currentDirectory || '');
+    return dir ? path.basename(dir) : '';
+  } catch {
+    return '';
+  }
+}
+
+/** A summary carried over from a previous model run is not a title. */
+function isCarryOver(text: string): boolean {
+  return /^Another language model started to solve this problem/i.test(text);
+}
+
+/** Title, preview and project for one conversation, read from its own file. */
+export async function localConversationSummary(
+  topic: string,
+): Promise<{ title: string; preview: string; project: string }> {
   const file = agentSessionFile(topic);
-  if (!file) return { title: topic, preview: '' };
+  const project = file ? sessionProject(file) : '';
+  if (!file) return { title: topic, preview: '', project };
   const records = await readAgentRecords(file);
-  const firstUser = records.find((item) => item.role === 'user');
-  const lastAssistant = [...records].reverse().find((item) => item.role === 'assistant');
   const oneLine = (text: string) => text.replace(/\s+/g, ' ').trim();
   // Skip the transport envelope the CatsCo bridge puts in front of the text.
   const clean = (text: string) => oneLine(text.replace(/^\[发言人:[^\]]*\]\s*/, ''));
-  const title = firstUser ? clean(firstUser.text).slice(0, 60) : topic;
+  const users = records.filter((item) => item.role === 'user').map((item) => clean(item.text));
+  const lastAssistant = [...records].reverse().find((item) => item.role === 'assistant');
   const preview = lastAssistant ? clean(lastAssistant.text).slice(0, 120) : '';
-  return { title: title || topic, preview };
+
+  // The first real request names the conversation. Sessions that start with a
+  // handoff preamble fall back to the latest request instead.
+  let title = users.find((text, index) => text && (index > 0 || !isCarryOver(text))) ?? '';
+  if (!title) title = users[users.length - 1] ?? topic;
+  return { title: title.slice(0, 60) || topic, preview, project };
 }
