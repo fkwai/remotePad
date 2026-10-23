@@ -80,7 +80,7 @@ End-to-end tests drive the real UI in Chromium (clicks, right-click menus, addre
 ```bash
 pnpm install
 npx playwright install chromium   # first time only
-pnpm test:e2e                     # headless, ~20s
+pnpm test:e2e                     # headless, ~22s, 32 tests
 pnpm test:e2e:headed              # watch the clicks
 ```
 
