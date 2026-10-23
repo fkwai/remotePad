@@ -4,11 +4,14 @@ import { prepare } from './tests/e2e/support/prepare';
 // Creates .e2e/ (isolated HOME, fixtures, settings) before any server starts.
 const state = prepare();
 
-const UI_PORT = 3998;
-const API_PORT = 3999;
+// Ports are env-driven so parallel worktrees (scripts/dev-worktree.sh) do not
+// collide; tests/server/* do not need them at all.
+const UI_PORT = Number(process.env.E2E_UI_PORT || 3998);
+const API_PORT = Number(process.env.E2E_API_PORT || 3999);
 
 export default defineConfig({
-  testDir: './tests/e2e',
+  // tests/e2e = browser gestures, tests/server = node-level modules.
+  testDir: './tests',
   timeout: 30_000,
   expect: { timeout: 7_000 },
   fullyParallel: false,

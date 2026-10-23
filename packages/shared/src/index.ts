@@ -372,3 +372,5 @@ export {
   type CatsCoLinkState,
   type CatsCoStatusView,
 } from './catsco.ts';
+
+export { type UpdateStatus, type UpdateResult } from './update.ts';

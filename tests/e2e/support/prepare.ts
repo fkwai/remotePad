@@ -50,7 +50,10 @@ export function prepare(): E2EState {
     fs.writeFileSync(path.join(work, name), body);
   }
 
-  fs.writeFileSync(settingsPath, JSON.stringify({ host: '127.0.0.1', port: 3999, uiPort: 3998 }, null, 2));
+  // Same ports the Playwright config boots the two servers on.
+  const apiPort = Number(process.env.E2E_API_PORT || 3999);
+  const uiPort = Number(process.env.E2E_UI_PORT || 3998);
+  fs.writeFileSync(settingsPath, JSON.stringify({ host: '127.0.0.1', port: apiPort, uiPort }, null, 2));
 
   // A seeded favorites store pins the fixture folder as the tree root, so tree
   // tests do not depend on the real filesystem layout.
