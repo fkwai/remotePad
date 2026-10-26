@@ -747,6 +747,8 @@ export class AgentHost {
   private catscoQuiet: QuietWatch | null = null;
   /** Set once the transcript has been still long enough to call the turn done. */
   private catscoQuietDone = false;
+  private catscoLastPollAt = 0;
+  private catscoLastPollError = '';
   /** Paths a tool call touched, kept from its start event until it ends. */
   private rpcPaths = new Map<string, string[]>();
   /** What the pane already shows, so an unchanged refresh stays silent. */
@@ -1301,6 +1303,29 @@ export class AgentHost {
     this.catscoListTimer = null;
   }
 
+  /**
+   * Why the panel is (or is not) showing a running turn. Read by the UI-agnostic
+   * diagnostics endpoint; the Stop button has been wrong twice, so the state that
+   * decides it must be inspectable from outside the process.
+   */
+  diagnostics() {
+    return {
+      backend: this.backend,
+      status: this.status,
+      sending: this.sending,
+      topic: this.catscoTopic || null,
+      cloudWorking: this.catscoWasWorking,
+      quietId: this.catscoQuiet?.id ?? null,
+      quietSinceMs: this.catscoQuiet ? Date.now() - this.catscoQuiet.since : null,
+      quietDone: this.catscoQuietDone,
+      tailing: Boolean(this.agentTail),
+      lastPollAt: this.catscoLastPollAt || null,
+      msSincePoll: this.catscoLastPollAt ? Date.now() - this.catscoLastPollAt : null,
+      lastPollError: this.catscoLastPollError || null,
+      error: this.error || null,
+    };
+  }
+
   private async pollCatsCoState(): Promise<void> {
     if (this.backend !== 'catsco') {
       this.stopCatsCoListPoller();
@@ -1309,6 +1334,8 @@ export class AgentHost {
     try {
       const conversations = await listCatsCoConversations();
       if (this.backend !== 'catsco') return;
+      this.catscoLastPollAt = Date.now();
+      this.catscoLastPollError = '';
       // Self-heal a turn that was abandoned mid-flight (topic switch, dropped
       // poll): if the cloud says the task is done and we are not sending, the
       // panel must not stay locked on "working" forever.
@@ -1361,8 +1388,10 @@ export class AgentHost {
             // the cloud still reports the task as running.
             if (!this.agentTail) await this.syncCatsCoTranscript(true);
           }
-        } catch {
-          // A Dashboard blip must not reopen a finished turn.
+        } catch (err) {
+          // A Dashboard blip must not reopen a finished turn — but it must be
+          // visible, because a silent catch is how the Stop button stayed on.
+          this.catscoLastPollError = err instanceof Error ? err.message : String(err);
         }
       }
 
