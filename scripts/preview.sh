@@ -99,6 +99,15 @@ check_one() {
     case "$code" in 2*|3*) ;; *) fail=1 ;; esac
   done
 
+  # Config the user expects in a preview: favorites and pinned repos.
+  for probe in favorites repos; do
+    count=$(curl -s --max-time 10 "http://127.0.0.1:$api/api/$probe" \
+      | python3 -c 'import json,sys
+d = json.load(sys.stdin)
+print(len(d.get("folders") if "folders" in d else d.get("repos") or []))' 2>/dev/null || echo '?')
+    printf '  %-16s %s\n' "$probe" "$count"
+  done
+
   # The repos control file: the panel offers it, so a fresh profile must have it.
   control=$(curl -s --max-time 10 "http://127.0.0.1:$api/api/repos" \
     | python3 -c 'import json,sys; print(json.load(sys.stdin).get("controlPath",""))' 2>/dev/null || true)
@@ -189,6 +198,18 @@ fi
 
 HOME_DIR="$HOME/.remotepad-preview/$NAME"
 mkdir -p "$HOME_DIR/.remotepad"
+
+# Settings the user expects to find in a preview (favorites, pinned repos,
+# viewer modules, model keys) are shared by symlink. Everything that describes a
+# *running* session (tabs, agent backend/topic, history, accepted changes) stays
+# in the preview's own HOME, so previewing cannot disturb the live instance.
+for shared in favorites.json workspaces.json modules.json llm.json; do
+  src="$HOME/.remotepad/$shared"
+  dst="$HOME_DIR/.remotepad/$shared"
+  if [ ! -e "$dst" ] && [ -e "$src" ]; then
+    ln -s "$src" "$dst"
+  fi
+done
 SETTINGS="$WT/.dev/settings.json"
 mkdir -p "$WT/.dev"
 printf '{\n  "host": "127.0.0.1",\n  "port": %s,\n  "uiPort": %s\n}\n' "$API" "$UI" > "$SETTINGS"
