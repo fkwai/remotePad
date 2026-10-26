@@ -214,7 +214,13 @@ mkdir -p "$HOME_DIR/.remotepad"
 for shared in favorites.json workspaces.json modules.json llm.json; do
   src="$HOME/.remotepad/$shared"
   dst="$HOME_DIR/.remotepad/$shared"
-  if [ ! -e "$dst" ] && [ -e "$src" ]; then
+  [ -e "$src" ] || continue
+  # An earlier preview run may have created its own copy (empty). Settings belong
+  # to the user, so a plain file is moved aside and replaced by the link.
+  if [ -e "$dst" ] && [ ! -L "$dst" ]; then
+    mv "$dst" "$dst.preview-$(date +%s)"
+  fi
+  if [ ! -e "$dst" ]; then
     ln -s "$src" "$dst"
   fi
 done
