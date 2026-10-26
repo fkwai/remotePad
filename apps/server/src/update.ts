@@ -80,7 +80,10 @@ export async function readUpdateStatus(repo: string, options: UpdateOptions = {}
     base.branch = (await git(repo, ['rev-parse', '--abbrev-ref', 'HEAD'])) || null;
     if (base.branch === 'HEAD') base.branch = null;
     base.head = await git(repo, ['rev-parse', 'HEAD']);
-    base.dirty = (await git(repo, ['status', '--porcelain'])) !== '';
+    // Untracked files (an editor's .vscode/, build leftovers) do not block a
+    // fast-forward: git refuses by itself if the merge would overwrite one. Only
+    // tracked modifications can lose work, so only those count as dirty.
+    base.dirty = (await git(repo, ['status', '--porcelain', '--untracked-files=no'])) !== '';
   } catch (err) {
     return { ...base, warning: errorText(err) };
   }

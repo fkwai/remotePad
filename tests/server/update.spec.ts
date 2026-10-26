@@ -112,6 +112,22 @@ test.describe('git update module', () => {
     expect(fs.readFileSync(path.join(f.consumer, 'README.md'), 'utf8')).toBe('local edit\n');
   });
 
+  test('an untracked file does not block the update', async () => {
+    const f = makeFixture();
+    f.pushCommit('two.txt', 'two\n');
+    fs.mkdirSync(path.join(f.consumer, '.vscode'));
+    fs.writeFileSync(path.join(f.consumer, '.vscode', 'settings.json'), '{}\n');
+
+    const status = await readUpdateStatus(f.consumer, { fetch: true, forceFetch: true });
+    expect(status.dirty).toBe(false);
+    expect(status.canUpdate).toBe(true);
+
+    const result = await applyUpdate(f.consumer);
+    expect(result.updated).toBe(true);
+    // The untracked file survives the fast-forward.
+    expect(fs.existsSync(path.join(f.consumer, '.vscode', 'settings.json'))).toBe(true);
+  });
+
   test('refuses when the local branch has unpublished commits', async () => {
     const f = makeFixture();
     f.pushCommit('two.txt', 'two\n');
