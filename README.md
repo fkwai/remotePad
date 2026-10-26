@@ -123,28 +123,31 @@ worktrees can run their own suite at the same time.
 
 ## Development protocol
 
-The install at `/srv/remotepad` is what the user is running, and it must stay on
-`main` and clean: a dirty tree or a local branch turns the update button grey.
-Every change goes worktree → test → pull request.
+The install you are working in is live. Nothing below restarts it, writes to it,
+or drops your terminal sessions: a preview is a second instance with its own
+worktree, HOME and ports.
 
-1. **Worktree.** `scripts/dev-worktree.sh <feature>` creates `helper/<feature>`
-   with `.dev/settings.json`, its own ports and its own `node_modules`.
-2. **Test with the feature.** New behaviour adds a spec; a change inside an
-   existing area extends that area's spec; only a genuinely independent surface
-   gets a new file.
-3. **Run the related spec, not the world.** `npx playwright test
-   tests/e2e/<area>.spec.ts` (or `tests/server/...`). Full suite before the PR.
-4. **Pull request.** `scripts/pr.sh <feature>` pushes the branch and opens a PR
-   against `main` (prints the compare URL when `gh` is unavailable).
-5. **Merge the PR.** `main` is the delivery channel; nothing lands there from a
-   worktree directly.
-6. **Runtimes pull with one click.** Every RemotePad polls `GET /api/update` and
-   shows **Update N** next to the RemotePad wordmark when `origin/main` has
-   commits it does not. The button fast-forwards (`POST /api/update`) and
-   reloads; it refuses when the tree is dirty or the branch has local commits, so
-   it can never discard work. When `package.json`/`pnpm-lock.yaml` moved it asks
-   for an install instead of reloading into a broken build; web changes are
-   rebuilt before the reload; server changes ask for a restart.
+1. **Build in a worktree, look at a preview.**
+   `scripts/preview.sh <feature>` creates `helper/<feature>`, starts it on its own
+   ports (61xx) with its own `~/.remotepad-preview/<feature>` data, and prints the
+   URL plus the SSH tunnel line. Tests run in that worktree
+   (`npx playwright test tests/e2e/<area>.spec.ts`, E2E ports `E2E_*_PORT`), never
+   against the live instance.
+2. **You play with it.** Nothing is merged yet. `scripts/preview.sh status` lists
+   what is running, `scripts/preview.sh stop <feature>` tears one down.
+3. **Ship it once you confirm.** `scripts/release.sh <version> "<summary>"` bumps
+   the version and the changelog; `scripts/pr.sh <feature>` pushes and opens the
+   pull request; merge it. Tag after the merge:
+   `git tag -a v<version> -m <version> && git push origin v<version>`.
+4. **Update the running install when you want.** It polls `GET /api/update` and
+   shows **Update N** next to the wordmark; one click fast-forwards and reloads.
+   Nothing updates on its own. A dirty tree or local commits blocks the button —
+   that is the guard against losing work, not a bug. Web changes are rebuilt
+   before the reload; server changes ask for a restart; `package.json` changes ask
+   for an install.
+
+`pnpm test:e2e` runs everything (~30s, 58 tests); run the area you touched while
+developing, the whole suite before the pull request.
 
 ## Access
 

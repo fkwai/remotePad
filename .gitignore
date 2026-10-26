@@ -26,3 +26,8 @@ playwright-report/
 # per-worktree local settings (scripts/dev-worktree.sh)
 .dev/
 .worktrees/
+
+# preview instances (scripts/preview.sh)
+.previews/
+# per-worktree settings (scripts/dev-worktree.sh)
+.dev/

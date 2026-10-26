@@ -159,16 +159,26 @@ Work on a branch in this checkout when the user asks to persist. Branch naming f
 
 ## Development (agents)
 
-This checkout runs the product for the user and must stay on `main` and clean —
-otherwise the update button greys out. Never edit it for feature work.
+The checkout the user is working in runs the product. Never restart it, never
+write to its tree, never let a feature land there unmerged — that is the "do not
+interrupt my usage" rule.
 
-Worktree → test → PR:
+Loop:
 
-1. `./scripts/dev-worktree.sh <feature>` → `helper/<feature>` worktree with `.dev/settings.json` (own ports) and its own `node_modules`. Override the location with `REMOTEPAD_WORKTREE_DIR`.
-2. Change code and add tests there. New behaviour gets a spec; a change inside an existing area extends that area's spec; only a genuinely independent surface gets a new file.
-3. Run the related spec (`npx playwright test tests/e2e/<area>.spec.ts` or `tests/server/...`), not the whole suite. Full suite before the PR.
-4. `./scripts/pr.sh <feature>` pushes the branch and opens a PR against `main` (no `gh` → prints the compare URL; never push `main` from a worktree, never force-push).
-5. Merge the PR. `main` is the delivery channel: every runtime then shows **Update N** and fast-forwards with one click; the endpoint refuses a dirty tree or local commits, so it cannot discard work.
+1. `./scripts/preview.sh <feature>` — worktree `helper/<feature>`, own HOME
+   (`~/.remotepad-preview/<feature>`), own ports (61xx), own session file. Prints
+   the URL and the tunnel line. It starts a second instance; the live one keeps
+   running untouched.
+2. Edit in that worktree. Tests run there too: `npx playwright test
+   tests/e2e/<area>.spec.ts` (or `tests/server/...`) with `E2E_API_PORT` /
+   `E2E_UI_PORT` set to unused ports. New behaviour adds a spec; a change inside
+   an existing area extends that area's spec.
+3. Hand the preview URL to the user and wait for confirmation. Do not merge on
+   your own judgement of "it works".
+4. On confirmation: `./scripts/release.sh <version> "<summary>"` (version bump +
+   changelog), `./scripts/pr.sh <feature>` (push + PR), merge the PR, then tag.
+5. The user's install updates through **Update N** when they choose. Never push
+   `main` directly, never force-push, never restart a runtime to "make it live".
 
 ## Update button
 
