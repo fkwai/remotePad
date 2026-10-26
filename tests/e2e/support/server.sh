@@ -14,5 +14,10 @@ export HOME="$STATE/home"
 export REMOTEPAD_SETTINGS="$STATE/settings.json"
 export REMOTEPAD_ROOTS="$STATE/work"
 export REMOTEPAD_SESSION_PATH="$STATE/session.json"
+# Agent session files the CatsCo tail follows; the cloud list is not polled.
+export REMOTEPAD_AGENT_SESSIONS="$STATE/agent-sessions"
+# Cloud chat vs the stand-in Dashboard (tests/e2e/support/fake-dashboard.mjs), so
+# the CatsCo round tests exercise the real poll path.
+export REMOTEPAD_CATSCO_DASHBOARD="http://127.0.0.1:3871"
 
 exec "$ROOT/apps/server/node_modules/.bin/tsx" "$ROOT/apps/server/src/index.ts"

@@ -22,7 +22,7 @@ import {
   type CatsCoConversation,
 } from '../catsco-chat.ts';
 import { ChangeTracker } from './changes.ts';
-import { settleConversation, watchQuiet, type QuietWatch } from './catsco-settle.ts';
+import { settleConversation, turnIsOpen, watchQuiet, type QuietWatch } from './catsco-settle.ts';
 import { TurnSnapshot } from './turn-snapshot.ts';
 import {
   agentSessionFile,
@@ -1302,10 +1302,6 @@ export class AgentHost {
   }
 
   private async pollCatsCoState(): Promise<void> {
-    if (config.catscoLocalOnly) {
-      this.stopCatsCoListPoller();
-      return;
-    }
     if (this.backend !== 'catsco') {
       this.stopCatsCoListPoller();
       return;
@@ -1335,18 +1331,35 @@ export class AgentHost {
       if (!cloudWorking && !this.agentTail) await this.syncCatsCoTranscript(justFinished);
       if (cloudWorking) await this.harvestCatsCoChanges().catch(() => undefined);
 
+      // Mirror the cloud's view into our own status so the panel and the watch
+      // agree, even for a turn started from another device.
+      if (!this.sending && cloudWorking && this.status !== 'running') {
+        this.status = 'running';
+        this.emit({ type: 'status', state: 'running' });
+      }
+
       // Watch the transcript while a turn is open: the cloud's task_status can
-      // lag behind the answer, and that lag is what left Stop on.
-      if (!this.sending && this.status === 'running' && this.catscoTopic) {
+      // lag behind the answer, and that lag is what left Stop on. This must not
+      // depend on our own status, which is idle for app-started turns.
+      if (!this.sending && this.catscoTopic && turnIsOpen({
+        sending: this.sending, status: this.status, cloudWorking,
+      })) {
         try {
           const newest = await fetchCatsCoMessages(this.catscoTopic, this.catscoUserUid, 1);
           const tail = newest[newest.length - 1];
           const watch = watchQuiet(this.catscoQuiet, tail, Date.now());
           this.catscoQuiet = watch.state;
+          // A tool row (or the user's own message) at the tail proves the turn is
+          // still open: forget an earlier settle so the next answer is watched
+          // from scratch instead of being declared done on sight.
+          if (!watch.state) this.catscoQuietDone = false;
           if (watch.settled && !this.catscoQuietDone) {
             this.catscoQuietDone = true;
             this.status = 'idle';
             this.emit({ type: 'status', state: 'idle', message: 'transcript' });
+            // The answer is in the transcript we just read: show it, even though
+            // the cloud still reports the task as running.
+            if (!this.agentTail) await this.syncCatsCoTranscript(true);
           }
         } catch {
           // A Dashboard blip must not reopen a finished turn.

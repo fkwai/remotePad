@@ -12,6 +12,10 @@ export const fixture = state.fixture as {
   nestedJson: string;
 };
 export const fixtureRoot: string = state.work;
+/** Agent session files the server follows (the CatsCo transcript). */
+export const sessionsDir: string = state.sessionsDir;
+/** Cloud state served by the stand-in Dashboard; specs rewrite it. */
+export const dashboardFile: string = state.dashboardFile;
 
 const escapeRe = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 

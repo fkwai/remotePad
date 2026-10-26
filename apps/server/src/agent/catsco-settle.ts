@@ -53,6 +53,17 @@ export function watchQuiet(
   return { state: prev, settled: now - prev.since >= quietMs };
 }
 
+/**
+ * Is a cloud turn open right now?
+ *
+ * A round started from the CatsCo app never goes through send(), so `status`
+ * can still be idle while the cloud is running. Gating the end-of-turn watch on
+ * `status === 'running'` left the panel stuck on Stop forever.
+ */
+export function turnIsOpen(input: { sending: boolean; status: string; cloudWorking: boolean }): boolean {
+  return input.sending || input.cloudWorking || input.status === 'running';
+}
+
 /** True when any conversation still reports a running turn. */
 export function anyWorking(conversations: CatsCoConversation[]): boolean {
   return conversations.some((item) => item.working);

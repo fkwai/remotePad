@@ -12,6 +12,11 @@ const work = path.join(stateDir, 'work');
 const settingsPath = path.join(stateDir, 'settings.json');
 const sessionFile = path.join(stateDir, 'session.json');
 const statePath = path.join(stateDir, 'state.json');
+/** Where the e2e server looks for agent session files (XiaoBa writes them). */
+const sessionsDir = path.join(stateDir, 'agent-sessions');
+/** Cloud state the fake Dashboard serves; tests rewrite it per step. */
+const dashboardFile = path.join(stateDir, 'dashboard.json');
+const DASHBOARD_PORT = 3871;
 
 const files: Record<string, string> = {
   'a.md': '# Alpha\n\nMarkdown body.\n',
@@ -27,6 +32,9 @@ export interface E2EState {
   work: string;
   settingsPath: string;
   sessionFile: string;
+  sessionsDir: string;
+  dashboardFile: string;
+  dashboardPort: number;
   fixture: { root: string; markdown: string; csv: string; nestedJson: string };
 }
 
@@ -45,6 +53,8 @@ export function prepare(): E2EState {
   fs.rmSync(stateDir, { recursive: true, force: true });
   fs.mkdirSync(path.join(home, '.remotepad'), { recursive: true });
   fs.mkdirSync(path.join(work, 'sub'), { recursive: true });
+  fs.mkdirSync(sessionsDir, { recursive: true });
+  fs.writeFileSync(dashboardFile, JSON.stringify({ taskState: 'idle', messages: [] }, null, 2));
 
   for (const [name, body] of Object.entries(files)) {
     fs.writeFileSync(path.join(work, name), body);
@@ -66,12 +76,22 @@ export function prepare(): E2EState {
   // the test instance and is thrown away with .e2e/.
   fs.writeFileSync(sessionFile, '{}');
 
+  // Start in the cloud backend so the CatsCo round tests exercise the real path
+  // (session-file tail + turn settle) instead of the local agent.
+  fs.writeFileSync(
+    path.join(home, '.remotepad', 'agent-backend.json'),
+    JSON.stringify({ backend: 'catsco' }, null, 2),
+  );
+
   const state: E2EState = {
     stateDir,
     home,
     work,
     settingsPath,
     sessionFile,
+    sessionsDir,
+    dashboardFile,
+    dashboardPort: DASHBOARD_PORT,
     fixture: {
       root: work,
       markdown: path.join(work, 'a.md'),
