@@ -58,7 +58,12 @@ print(f'CHANGELOG.md: {version}')
 PY
 
 git add package.json apps/web/package.json apps/server/package.json packages/shared/package.json CHANGELOG.md
-git commit -q -m "$VERSION: $SUMMARY"
+# Committing must work on a machine without a configured git identity.
+IDENT=()
+if [ -z "$(git config user.name || true)" ]; then
+  IDENT=(-c user.name="${GIT_AUTHOR_NAME:-kuai}" -c user.email="${GIT_AUTHOR_EMAIL:-noreply@remotePad.local}")
+fi
+git "${IDENT[@]}" commit -q -m "$VERSION: $SUMMARY"
 
 cat <<EOF
 released $VERSION on $(git rev-parse --abbrev-ref HEAD)
