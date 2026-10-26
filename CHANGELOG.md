@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.0.3 — 2026-10-26
+
+Promoted from the 2026-10-26 nightly.
+
+- Lanes: stable / dev / nightly, switchable from the version panel; the panel now
+  reads the branch's real upstream, so a worktree branch reports the lane it tracks
+- Nightly CI: `scripts/nightly.sh` merges main + dev + clean feature branches,
+  stamps `X.Y.Z-nightly.DATE`, runs the full suite and only publishes on green;
+  runs at 03:00 via `remotepad-nightly.timer`
+- Nightly tooling fixes: starts from `origin/nightly` every run, never mistakes a
+  failed merge for a conflicting branch, commits the version stamp only after the
+  suite passes
+
 ## 0.0.2 — 2026-10-26
 
 - Copy / cut / paste files in the Sidebar tree and the Folder Explorer, by menu or
