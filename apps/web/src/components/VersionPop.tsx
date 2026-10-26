@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import type { UpdateStatus } from '@remotepad/shared';
+import type { PreviewInfo, UpdateStatus } from '@remotepad/shared';
 import { api } from '../api';
 
 /**
@@ -11,13 +11,19 @@ import { api } from '../api';
  */
 export function VersionPop({ onClose }: { onClose: () => void }) {
   const [status, setStatus] = useState<UpdateStatus | null>(null);
+  const [previews, setPreviews] = useState<PreviewInfo[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
   const load = useCallback(async () => {
     setBusy(true);
     try {
-      setStatus(await api<UpdateStatus>('/api/update'));
+      const [next, list] = await Promise.all([
+        api<UpdateStatus>('/api/update'),
+        api<{ previews: PreviewInfo[] }>('/api/previews').catch(() => ({ previews: [] })),
+      ]);
+      setStatus(next);
+      setPreviews(list.previews);
       setError(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -65,6 +71,35 @@ export function VersionPop({ onClose }: { onClose: () => void }) {
         )}
 
         {status?.warning && <p className="version-warn">{status.warning}</p>}
+
+        <div className="version-previews">
+          <div className="version-previews-head">
+            <span>Previews</span>
+            {previews.length > 0 && <span className="version-previews-count">{previews.length}</span>}
+          </div>
+          {previews.length === 0 && (
+            <p className="version-empty">
+              None running. <code>scripts/preview.sh &lt;feature&gt;</code> starts one.
+            </p>
+          )}
+          {previews.map((preview) => (
+            <div className={`version-preview ${preview.alive ? 'live' : 'dead'}`} key={preview.name}>
+              <span className="version-preview-name" title={preview.name}>{preview.name}</span>
+              <span className="version-preview-port">:{preview.uiPort}</span>
+              <button
+                type="button"
+                className="ghost version-preview-copy"
+                title={`ssh -N -L ${preview.uiPort}:127.0.0.1:${preview.uiPort} <host-alias>`}
+                onClick={() => {
+                  const cmd = `ssh -N -L ${preview.uiPort}:127.0.0.1:${preview.uiPort} <host-alias>`;
+                  navigator.clipboard?.writeText(cmd).catch(() => undefined);
+                }}
+              >
+                tunnel
+              </button>
+            </div>
+          ))}
+        </div>
 
         <div className="version-actions">
           <button className="ghost" onClick={() => void load()} disabled={busy}>

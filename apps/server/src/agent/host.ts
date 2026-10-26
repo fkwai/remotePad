@@ -22,7 +22,7 @@ import {
   type CatsCoConversation,
 } from '../catsco-chat.ts';
 import { ChangeTracker } from './changes.ts';
-import { settleConversation } from './catsco-settle.ts';
+import { settleConversation, turnIsOpen, watchQuiet, type QuietWatch } from './catsco-settle.ts';
 import { TurnSnapshot } from './turn-snapshot.ts';
 import {
   agentSessionFile,
@@ -743,6 +743,12 @@ export class AgentHost {
   private catscoSeq = 0;
   /** Was the open turn running on the previous poll? Drives the single closing fetch. */
   private catscoWasWorking = false;
+  /** Transcript quiet-watch: the end-of-turn signal the cloud does not give us. */
+  private catscoQuiet: QuietWatch | null = null;
+  /** Set once the transcript has been still long enough to call the turn done. */
+  private catscoQuietDone = false;
+  private catscoLastPollAt = 0;
+  private catscoLastPollError = '';
   /** Paths a tool call touched, kept from its start event until it ends. */
   private rpcPaths = new Map<string, string[]>();
   /** What the pane already shows, so an unchanged refresh stays silent. */
@@ -1297,11 +1303,30 @@ export class AgentHost {
     this.catscoListTimer = null;
   }
 
+  /**
+   * Why the panel is (or is not) showing a running turn. Read by the UI-agnostic
+   * diagnostics endpoint; the Stop button has been wrong twice, so the state that
+   * decides it must be inspectable from outside the process.
+   */
+  diagnostics() {
+    return {
+      backend: this.backend,
+      status: this.status,
+      sending: this.sending,
+      topic: this.catscoTopic || null,
+      cloudWorking: this.catscoWasWorking,
+      quietId: this.catscoQuiet?.id ?? null,
+      quietSinceMs: this.catscoQuiet ? Date.now() - this.catscoQuiet.since : null,
+      quietDone: this.catscoQuietDone,
+      tailing: Boolean(this.agentTail),
+      lastPollAt: this.catscoLastPollAt || null,
+      msSincePoll: this.catscoLastPollAt ? Date.now() - this.catscoLastPollAt : null,
+      lastPollError: this.catscoLastPollError || null,
+      error: this.error || null,
+    };
+  }
+
   private async pollCatsCoState(): Promise<void> {
-    if (config.catscoLocalOnly) {
-      this.stopCatsCoListPoller();
-      return;
-    }
     if (this.backend !== 'catsco') {
       this.stopCatsCoListPoller();
       return;
@@ -1309,6 +1334,8 @@ export class AgentHost {
     try {
       const conversations = await listCatsCoConversations();
       if (this.backend !== 'catsco') return;
+      this.catscoLastPollAt = Date.now();
+      this.catscoLastPollError = '';
       // Self-heal a turn that was abandoned mid-flight (topic switch, dropped
       // poll): if the cloud says the task is done and we are not sending, the
       // panel must not stay locked on "working" forever.
@@ -1322,10 +1349,51 @@ export class AgentHost {
       this.catscoWasWorking = cloudWorking;
       // A turn started from the CatsCo app never passes through send(): take the
       // baseline here so its edits are still attributed to this conversation.
-      if (justStarted) await this.turnSnapshot.capture(this.uiCwd || this.resolveCwd());
+      if (justStarted) {
+        this.catscoQuiet = null;
+        this.catscoQuietDone = false;
+        await this.turnSnapshot.capture(this.uiCwd || this.resolveCwd());
+      }
       if (justFinished) await this.applyTurnChanges();
       if (!cloudWorking && !this.agentTail) await this.syncCatsCoTranscript(justFinished);
       if (cloudWorking) await this.harvestCatsCoChanges().catch(() => undefined);
+
+      // Mirror the cloud's view into our own status so the panel and the watch
+      // agree, even for a turn started from another device.
+      if (!this.sending && cloudWorking && this.status !== 'running') {
+        this.status = 'running';
+        this.emit({ type: 'status', state: 'running' });
+      }
+
+      // Watch the transcript while a turn is open: the cloud's task_status can
+      // lag behind the answer, and that lag is what left Stop on. This must not
+      // depend on our own status, which is idle for app-started turns.
+      if (!this.sending && this.catscoTopic && turnIsOpen({
+        sending: this.sending, status: this.status, cloudWorking,
+      })) {
+        try {
+          const newest = await fetchCatsCoMessages(this.catscoTopic, this.catscoUserUid, 1);
+          const tail = newest[newest.length - 1];
+          const watch = watchQuiet(this.catscoQuiet, tail, Date.now());
+          this.catscoQuiet = watch.state;
+          // A tool row (or the user's own message) at the tail proves the turn is
+          // still open: forget an earlier settle so the next answer is watched
+          // from scratch instead of being declared done on sight.
+          if (!watch.state) this.catscoQuietDone = false;
+          if (watch.settled && !this.catscoQuietDone) {
+            this.catscoQuietDone = true;
+            this.status = 'idle';
+            this.emit({ type: 'status', state: 'idle', message: 'transcript' });
+            // The answer is in the transcript we just read: show it, even though
+            // the cloud still reports the task as running.
+            if (!this.agentTail) await this.syncCatsCoTranscript(true);
+          }
+        } catch (err) {
+          // A Dashboard blip must not reopen a finished turn — but it must be
+          // visible, because a silent catch is how the Stop button stayed on.
+          this.catscoLastPollError = err instanceof Error ? err.message : String(err);
+        }
+      }
 
       const settled = this.settleTurn(conversations);
       const active = settled.find((item) => item.id === this.catscoTopic);
@@ -1388,7 +1456,13 @@ export class AgentHost {
 
   /** A turn whose closing text already landed is not running any more. */
   private settleTurn(conversations: CatsCoConversation[]): CatsCoConversation[] {
-    if (!this.catscoFinalSeq || !this.catscoTopic) return conversations;
+    if (!this.catscoTopic) return conversations;
+    // Prefer the transcript we read ourselves; the seq comparison stays as the
+    // fallback for runtimes that follow the cloud list only.
+    if (this.catscoQuietDone) {
+      return settleConversation(conversations, this.catscoTopic, '任务已完成');
+    }
+    if (!this.catscoFinalSeq) return conversations;
     return conversations.map((item) => (
       item.id === this.catscoTopic
         && Number(item.latestSeq || 0) >= this.catscoFinalSeq

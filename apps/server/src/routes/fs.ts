@@ -50,12 +50,29 @@ async function toEntry(parent: string, name: string): Promise<FsEntry | null> {
   }
 }
 
+/**
+ * A missing path is a normal answer (404), not a crash.
+ *
+ * A fresh profile — a preview instance, a new machine — legitimately lacks files
+ * the UI offers to open (the repos control file, a saved session). Letting the
+ * raw ENOENT escape returned a 500 and put a Node stack in the toast.
+ */
+async function statOr404(target: string, label: 'File' | 'Folder') {
+  try {
+    return await fs.stat(target);
+  } catch (err) {
+    const code = (err as { code?: string }).code;
+    if (code === 'ENOENT' || code === 'ENOTDIR') throw new PathError(`${label} not found`, 404);
+    throw err;
+  }
+}
+
 export async function registerFsRoutes(app: FastifyInstance) {
   app.get('/api/fs/roots', async () => ({ roots: uniqueRoots() }));
 
   app.get<{ Querystring: { path?: string } }>('/api/fs/list', async (req) => {
     const target = resolveSafe(req.query.path || '/');
-    const stat = await fs.lstat(target);
+    const stat = await statOr404(target, 'Folder');
     if (!stat.isDirectory()) throw new PathError('Not a directory');
     const names = await fs.readdir(target);
     const entries = (await Promise.all(names.map((name) => toEntry(target, name))))
@@ -70,7 +87,7 @@ export async function registerFsRoutes(app: FastifyInstance) {
 
   app.get<{ Querystring: { path?: string } }>('/api/fs/read', async (req) => {
     const target = resolveSafe(req.query.path || '');
-    const stat = await fs.stat(target);
+    const stat = await statOr404(target, 'File');
     if (stat.isDirectory()) throw new PathError('Cannot read a directory');
     const buf = await fs.readFile(target);
     const ext = path.extname(target).toLowerCase();
@@ -88,7 +105,7 @@ export async function registerFsRoutes(app: FastifyInstance) {
 
   app.get<{ Querystring: { path?: string } }>('/api/fs/raw', async (req, reply) => {
     const target = resolveSafe(req.query.path || '');
-    const stat = await fs.stat(target);
+    const stat = await statOr404(target, 'File');
     if (stat.isDirectory()) throw new PathError('Cannot read a directory');
     const ext = path.extname(target).toLowerCase();
     reply.header('Content-Type', MIME[ext] || 'application/octet-stream');

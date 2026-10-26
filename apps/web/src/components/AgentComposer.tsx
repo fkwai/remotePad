@@ -38,6 +38,10 @@ export const AgentComposer = forwardRef<ComposerHandle, Props>(function AgentCom
   const editorRef = useRef<HTMLDivElement>(null);
   const refsRef = useRef<Map<string, AgentRef>>(new Map());
   const [empty, setEmpty] = useState(true);
+  /** Draft per conversation: switching away keeps what you typed, switching back
+   *  restores it — and nothing leaks into another conversation. */
+  const drafts = useRef(new Map<string, { html: string; refs: Map<string, AgentRef> }>());
+  const previousKey = useRef(sessionKey);
 
   const syncEmpty = () => {
     const el = editorRef.current;
@@ -49,9 +53,16 @@ export const AgentComposer = forwardRef<ComposerHandle, Props>(function AgentCom
   useEffect(() => {
     const el = editorRef.current;
     if (!el) return;
-    el.innerHTML = '';
-    refsRef.current = new Map();
-    setEmpty(true);
+    const from = previousKey.current;
+    if (from !== sessionKey) {
+      // Park the old draft, then bring back whatever this conversation had.
+      drafts.current.set(from, { html: el.innerHTML, refs: new Map(refsRef.current) });
+      previousKey.current = sessionKey;
+    }
+    const saved = drafts.current.get(sessionKey);
+    el.innerHTML = saved?.html ?? '';
+    refsRef.current = new Map(saved?.refs ?? []);
+    syncEmpty();
   }, [sessionKey]);
 
   function caretRange() {
@@ -134,6 +145,7 @@ export const AgentComposer = forwardRef<ComposerHandle, Props>(function AgentCom
     const el = editorRef.current;
     if (el) el.innerHTML = '';
     refsRef.current = new Map();
+    drafts.current.delete(sessionKey);
     setEmpty(true);
     onChange?.();
   }
@@ -144,6 +156,7 @@ export const AgentComposer = forwardRef<ComposerHandle, Props>(function AgentCom
     const wire = serialize(el, refsRef.current);
     if (!wire.trim()) return;
     onSubmit(wire);
+    drafts.current.delete(sessionKey);
     clear();
   }
 

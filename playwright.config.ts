@@ -28,6 +28,15 @@ export default defineConfig({
   projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
   webServer: [
     {
+      // Stand-in Dashboard: the CatsCo tests own `state.dashboardFile`.
+      command: `node tests/e2e/support/fake-dashboard.mjs ${state.dashboardFile} ${state.dashboardPort}`,
+      url: `http://127.0.0.1:${state.dashboardPort}/api/cats/status`,
+      reuseExistingServer: false,
+      timeout: 30_000,
+      stdout: 'ignore',
+      stderr: 'ignore',
+    },
+    {
       command: 'bash tests/e2e/support/server.sh',
       url: `http://127.0.0.1:${API_PORT}/api/machine`,
       reuseExistingServer: false,

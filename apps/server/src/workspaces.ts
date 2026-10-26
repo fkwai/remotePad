@@ -1,4 +1,5 @@
 import fs from 'node:fs/promises';
+import { statSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import type { Repo } from '@remotepad/shared';
@@ -75,8 +76,19 @@ async function withHeads(folders: Stored[]): Promise<Repo[]> {
 
 export async function listRepos(): Promise<Repo[]> {
   const { store, migrated } = await readStore();
-  if (migrated) await writeStore(store);
+  // The panel offers this file ("open control file"), so a fresh profile — a
+  // preview instance, a new machine — must have it. Creating it here is cheaper
+  // than teaching every caller to tolerate a missing file.
+  if (migrated || !fsExists(CONTROL_PATH)) await writeStore(store);
   return withHeads(store.folders);
+}
+
+function fsExists(target: string): boolean {
+  try {
+    return statSync(target).isFile();
+  } catch {
+    return false;
+  }
 }
 
 export async function pinRepo(input: string): Promise<Repo[]> {

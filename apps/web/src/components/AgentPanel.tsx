@@ -126,6 +126,10 @@ export function AgentPanel({
     : undefined;
   const busy = state === 'running' || Boolean(activeConversation?.working) || Boolean(switching);
   const activeId = sessionId ?? '';
+  // What the compose box belongs to. The cloud reuses the local session id, so
+  // a draft typed in one CatsCo conversation showed up in the next one; the topic
+  // has to be part of the key.
+  const conversationKey = catsco ? `catsco:${catscoList?.topicId ?? '_none'}` : `local:${activeId}`;
 
   const catscoBots = catscoList?.bots ?? [];
   const catscoProjects = catscoList?.projects ?? [];
@@ -758,7 +762,7 @@ export function AgentPanel({
       >
         <AgentComposer
           ref={composerRef}
-          sessionKey={activeId}
+          sessionKey={conversationKey}
           disabled={busy}
           placeholder={
             switching

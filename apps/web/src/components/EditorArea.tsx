@@ -328,7 +328,15 @@ export function EditorArea({
               />
             )
             : tab.agentPath && tab.before !== undefined && tab.after !== undefined
-            ? <DiffView path={tab.path} diff={tab.diff || ''} before={tab.before} after={tab.after} />
+            ? (
+              <DiffView
+                path={tab.path}
+                diff={tab.diff || ''}
+                before={tab.before}
+                after={tab.after}
+                onEdit={(value) => onChange(tab.path, value)}
+              />
+            )
             : tab.viewMode === 'rendered' && hasRenderedView(tab.kind)
             ? <Rendered tab={tab} onInfo={setViewInfo} onChange={onChange} />
             : tab.kind === 'diff'

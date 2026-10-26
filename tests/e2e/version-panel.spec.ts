@@ -65,3 +65,45 @@ test.describe('version panel', () => {
     await expect(page.locator('.version-pop')).toHaveCount(0);
   });
 });
+
+test.describe('version panel previews', () => {
+  const status = {
+    repo: '/srv/remotepad', version: '0.0.1', branch: 'main',
+    head: 'abcdef1234567890abcdef1234567890abcdef12',
+    remoteHead: 'abcdef1234567890abcdef1234567890abcdef12',
+    behind: 0, ahead: 0, dirty: false, canUpdate: false,
+    checkedAt: new Date().toISOString(),
+  };
+
+  test('lists running previews with the port to forward', async ({ page }) => {
+    await page.route('**/api/update', (route) => route.fulfill({ json: status }));
+    await page.route('**/api/previews', (route) => route.fulfill({
+      json: {
+        previews: [
+          { name: 'keepall-stop-preview', uiPort: 6128, apiPort: 6129, alive: true },
+          { name: 'old-feature', uiPort: 6104, alive: false },
+        ],
+      },
+    }));
+
+    await gotoApp(page);
+    await page.locator('.topbar .brand').click();
+
+    const live = page.locator('.version-preview.live');
+    await expect(live).toContainText('keepall-stop-preview');
+    await expect(live).toContainText(':6128');
+    await expect(live.locator('button')).toHaveAttribute(
+      'title', /ssh -N -L 6128:127\.0\.0\.1:6128/,
+    );
+    await expect(page.locator('.version-preview.dead')).toContainText(':6104');
+  });
+
+  test('says none are running when there are none', async ({ page }) => {
+    await page.route('**/api/update', (route) => route.fulfill({ json: status }));
+    await page.route('**/api/previews', (route) => route.fulfill({ json: { previews: [] } }));
+
+    await gotoApp(page);
+    await page.locator('.topbar .brand').click();
+    await expect(page.locator('.version-previews')).toContainText('None running');
+  });
+});
