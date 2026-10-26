@@ -34,3 +34,13 @@ export interface UpdateResult {
   message: string;
   status?: UpdateStatus;
 }
+
+/** A preview instance started by `scripts/preview.sh` (GET /api/previews). */
+export interface PreviewInfo {
+  /** Feature name, i.e. the worktree branch suffix. */
+  name: string;
+  uiPort: number;
+  apiPort?: number;
+  /** The UI port answered a TCP connect just now. */
+  alive: boolean;
+}

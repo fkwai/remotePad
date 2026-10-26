@@ -291,6 +291,30 @@ input:focus { border-color: #4a7f73; }
 .version-error { color: #e08b8b; margin: 0 0 8px; }
 .version-warn { color: var(--muted); margin: 0 0 8px; }
 .version-actions { display: flex; justify-content: flex-end; }
+.version-previews { margin: 10px 0 0; border-top: 1px solid var(--border); padding-top: 8px; }
+.version-previews-head {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 11px; letter-spacing: .04em; text-transform: uppercase; color: var(--muted);
+  margin-bottom: 4px;
+}
+.version-previews-count {
+  font-size: 10px; padding: 0 5px; border-radius: 8px;
+  background: var(--panel-3); color: var(--text);
+}
+.version-empty { margin: 0; color: var(--muted); font-size: 11.5px; }
+.version-empty code { font-family: var(--mono); font-size: 11px; }
+.version-preview {
+  display: flex; align-items: center; gap: 8px;
+  padding: 3px 0; font-size: 12px;
+}
+.version-preview-name { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.version-preview-port { font-family: var(--mono); font-size: 11px; color: #a9c6f2; }
+.version-preview.live .version-preview-name::before {
+  content: ''; display: inline-block; width: 6px; height: 6px; border-radius: 50%;
+  background: #7ee0c5; margin-right: 6px; vertical-align: middle;
+}
+.version-preview.dead .version-preview-name { color: var(--muted); text-decoration: line-through; }
+.version-preview-copy { font-size: 11px; padding: 1px 6px; }
 .host-pop { right: 10px; }
 .host-pop .info-pane, .host-pop .info-wrap { height: auto; }
 .float-pop-head {

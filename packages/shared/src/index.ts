@@ -382,4 +382,4 @@ export {
   type CatsCoStatusView,
 } from './catsco.ts';
 
-export { type UpdateStatus, type UpdateResult } from './update.ts';
+export { type UpdateStatus, type UpdateResult, type PreviewInfo } from './update.ts';

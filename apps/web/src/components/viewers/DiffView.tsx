@@ -9,12 +9,17 @@ type Props = {
   before?: string;
   /** New file text (agent change). Empty string = deleted. */
   after?: string;
+  /**
+   * Called while the reader edits the green side. Present = the review is
+   * editable (fix the agent's output in place instead of reopening the file).
+   */
+  onEdit?: (value: string) => void;
 };
 
 /**
  * Cursor-style inline red/green when we have both sides; otherwise colorized unified patch.
  */
-export function DiffView({ path, diff = '', before, after }: Props) {
+export function DiffView({ path, diff = '', before, after, onEdit }: Props) {
   const filePath = path.startsWith('agent:') ? path.slice('agent:'.length)
     : path.startsWith('diff:') ? path.slice('diff:'.length)
     : path;
@@ -31,8 +36,15 @@ export function DiffView({ path, diff = '', before, after }: Props) {
           original={before}
           modified={after}
           beforeMount={defineTheme}
+          onMount={(editor) => {
+            if (!onEdit) return;
+            // The modified model is the file: every change is the new content.
+            editor.getModifiedEditor().onDidChangeModelContent(() => {
+              onEdit(editor.getModifiedEditor().getValue());
+            });
+          }}
           options={{
-            readOnly: true,
+            readOnly: !onEdit,
             renderSideBySide: false,
             renderIndicators: true,
             renderMarginRevertIcon: false,

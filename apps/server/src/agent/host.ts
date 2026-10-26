@@ -22,7 +22,7 @@ import {
   type CatsCoConversation,
 } from '../catsco-chat.ts';
 import { ChangeTracker } from './changes.ts';
-import { settleConversation } from './catsco-settle.ts';
+import { settleConversation, watchQuiet, type QuietWatch } from './catsco-settle.ts';
 import { TurnSnapshot } from './turn-snapshot.ts';
 import {
   agentSessionFile,
@@ -743,6 +743,10 @@ export class AgentHost {
   private catscoSeq = 0;
   /** Was the open turn running on the previous poll? Drives the single closing fetch. */
   private catscoWasWorking = false;
+  /** Transcript quiet-watch: the end-of-turn signal the cloud does not give us. */
+  private catscoQuiet: QuietWatch | null = null;
+  /** Set once the transcript has been still long enough to call the turn done. */
+  private catscoQuietDone = false;
   /** Paths a tool call touched, kept from its start event until it ends. */
   private rpcPaths = new Map<string, string[]>();
   /** What the pane already shows, so an unchanged refresh stays silent. */
@@ -1322,10 +1326,32 @@ export class AgentHost {
       this.catscoWasWorking = cloudWorking;
       // A turn started from the CatsCo app never passes through send(): take the
       // baseline here so its edits are still attributed to this conversation.
-      if (justStarted) await this.turnSnapshot.capture(this.uiCwd || this.resolveCwd());
+      if (justStarted) {
+        this.catscoQuiet = null;
+        this.catscoQuietDone = false;
+        await this.turnSnapshot.capture(this.uiCwd || this.resolveCwd());
+      }
       if (justFinished) await this.applyTurnChanges();
       if (!cloudWorking && !this.agentTail) await this.syncCatsCoTranscript(justFinished);
       if (cloudWorking) await this.harvestCatsCoChanges().catch(() => undefined);
+
+      // Watch the transcript while a turn is open: the cloud's task_status can
+      // lag behind the answer, and that lag is what left Stop on.
+      if (!this.sending && this.status === 'running' && this.catscoTopic) {
+        try {
+          const newest = await fetchCatsCoMessages(this.catscoTopic, this.catscoUserUid, 1);
+          const tail = newest[newest.length - 1];
+          const watch = watchQuiet(this.catscoQuiet, tail, Date.now());
+          this.catscoQuiet = watch.state;
+          if (watch.settled && !this.catscoQuietDone) {
+            this.catscoQuietDone = true;
+            this.status = 'idle';
+            this.emit({ type: 'status', state: 'idle', message: 'transcript' });
+          }
+        } catch {
+          // A Dashboard blip must not reopen a finished turn.
+        }
+      }
 
       const settled = this.settleTurn(conversations);
       const active = settled.find((item) => item.id === this.catscoTopic);
@@ -1388,7 +1414,13 @@ export class AgentHost {
 
   /** A turn whose closing text already landed is not running any more. */
   private settleTurn(conversations: CatsCoConversation[]): CatsCoConversation[] {
-    if (!this.catscoFinalSeq || !this.catscoTopic) return conversations;
+    if (!this.catscoTopic) return conversations;
+    // Prefer the transcript we read ourselves; the seq comparison stays as the
+    // fallback for runtimes that follow the cloud list only.
+    if (this.catscoQuietDone) {
+      return settleConversation(conversations, this.catscoTopic, '任务已完成');
+    }
+    if (!this.catscoFinalSeq) return conversations;
     return conversations.map((item) => (
       item.id === this.catscoTopic
         && Number(item.latestSeq || 0) >= this.catscoFinalSeq

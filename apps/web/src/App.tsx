@@ -1098,12 +1098,11 @@ export function App() {
         if (!tab.agentPath) return tab;
         const change = files.find((item) => item.path === tab.agentPath);
         if (!change) {
-          // Review done (Keep/Undo). A clean review tab goes away: keeping one
-          // per changed file filled the editor a round at a time. Unsaved edits
-          // stay open, just without the red/green overlay.
-          return tab.dirty
-            ? { ...tab, agentPath: undefined, before: undefined, after: undefined, diff: undefined }
-            : null;
+          // Review done (Keep/Undo). The tab stays open as a normal file tab —
+          // closing it emptied the editor under the reader. Content is re-read
+          // from disk by reloadTouched() below, so Keep shows the accepted text
+          // and Undo shows the restored text.
+          return { ...tab, agentPath: undefined, before: undefined, after: undefined, diff: undefined };
         }
         return {
           ...tab,
@@ -1426,6 +1425,10 @@ export function App() {
                     setTabs((prev) => prev.map((tab) => tab.path === path ? {
                       ...tab,
                       content,
+                      // Editing an agent review keeps the green side in step with
+                      // the text, so the diff shows the edit rather than the
+                      // agent's original proposal.
+                      after: tab.agentPath ? content : tab.after,
                       dirty: content !== tab.savedContent,
                       temp: tab.temp && content === tab.savedContent,
                     } : tab));

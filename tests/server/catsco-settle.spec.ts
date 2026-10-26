@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { anyWorking, settleConversation } from '../../apps/server/src/agent/catsco-settle.ts';
+import { anyWorking, settleConversation, watchQuiet } from '../../apps/server/src/agent/catsco-settle.ts';
 import type { CatsCoConversation } from '../../apps/server/src/catsco-chat.ts';
 
 const conv = (id: string, working: boolean): CatsCoConversation => ({
@@ -42,5 +42,35 @@ test.describe('cloud turn settlement', () => {
     expect(anyWorking([conv('a', false), conv('b', true)])).toBe(true);
     expect(anyWorking([conv('a', false)])).toBe(false);
     expect(anyWorking([])).toBe(false);
+  });
+});
+
+test.describe('transcript quiet watch', () => {
+  const tail = { id: 42, role: 'assistant', text: 'done' };
+
+  test('starts watching when the tail is the agent\'s message', () => {
+    const first = watchQuiet(null, tail, 1_000);
+    expect(first.state).toEqual({ id: 42, since: 1_000 });
+    expect(first.settled).toBe(false);
+  });
+
+  test('settles once the answer has stopped changing', () => {
+    const first = watchQuiet(null, tail, 1_000);
+    const quiet = watchQuiet(first.state, tail, 4_000, 3_000);
+    expect(quiet.settled).toBe(true);
+  });
+
+  test('a new message restarts the clock', () => {
+    const first = watchQuiet(null, tail, 1_000);
+    const next = watchQuiet(first.state, { ...tail, id: 43 }, 5_000, 3_000);
+    expect(next.settled).toBe(false);
+    expect(next.state).toEqual({ id: 43, since: 5_000 });
+  });
+
+  test('a trailing tool row or user message is not an answer', () => {
+    expect(watchQuiet(null, { id: 1, role: 'tool', text: 'x' }, 0).state).toBeNull();
+    expect(watchQuiet(null, { id: 2, role: 'user', text: 'x' }, 0).state).toBeNull();
+    expect(watchQuiet(null, { id: 3, role: 'assistant', text: '  ' }, 0).state).toBeNull();
+    expect(watchQuiet(null, undefined, 0).settled).toBe(false);
   });
 });
