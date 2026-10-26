@@ -12,7 +12,8 @@ import { TerminalPanel } from './components/TerminalPanel';
 import { UpdateButton } from './components/UpdateButton';
 import { RightDock } from './components/RightDock';
 import { TextClipMenu } from './components/ContextMenu';
-import { HelpPop, HostPop } from './components/Popovers';
+import { HostPop } from './components/Popovers';
+import { VersionPop } from './components/VersionPop';
 import type { AgentChatMessage } from './components/AgentPanel';
 
 export function App() {
@@ -38,7 +39,7 @@ export function App() {
   const [controlPath, setControlPath] = useState<string | null>(null);
   const [repoPath, setRepoPath] = useState<string | null>(null);
   const [sideTab, setSideTab] = useState<SideTab>('favorites');
-  const [helpOpen, setHelpOpen] = useState(false);
+  const [versionOpen, setVersionOpen] = useState(false);
   const [hostOpen, setHostOpen] = useState(false);
   const [moduleEnabled, setModuleEnabled] = useState<Record<ViewerModuleId, boolean>>(defaultViewerEnabled);
   const moduleEnabledRef = useRef(moduleEnabled);
@@ -1287,7 +1288,7 @@ export function App() {
   return (
     <div className="app">
       <header className="topbar">
-        <button type="button" className="brand" onClick={() => { setHelpOpen((v) => !v); setHostOpen(false); }}>
+        <button type="button" className="brand" onClick={() => { setVersionOpen((v) => !v); setHostOpen(false); }}>
           <span className="brand-mark" /> RemotePad
         </button>
         <UpdateButton onToast={showToast} />
@@ -1349,7 +1350,7 @@ export function App() {
           <button
             type="button"
             className="host-btn"
-            onClick={() => { setHostOpen((v) => !v); setHelpOpen(false); }}
+            onClick={() => { setHostOpen((v) => !v); setVersionOpen(false); }}
           >
             {machine.user}@{machine.hostname}
           </button>
@@ -1585,10 +1586,10 @@ export function App() {
           )}
         </PanelGroup>
       </div>
-      {helpOpen && (
+      {versionOpen && (
         <>
-          <div className="float-mask" onClick={() => setHelpOpen(false)} />
-          <HelpPop onClose={() => setHelpOpen(false)} />
+          <div className="float-mask" onClick={() => setVersionOpen(false)} />
+          <VersionPop onClose={() => setVersionOpen(false)} />
         </>
       )}
       {hostOpen && (

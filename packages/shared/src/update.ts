@@ -1,6 +1,8 @@
 /** Git update state for the running install (GET /api/update). */
 export interface UpdateStatus {
   repo: string;
+  /** Release version from the checkout's package.json (e.g. `0.0.1`). */
+  version?: string;
   branch: string | null;
   head: string | null;
   remoteHead: string | null;
