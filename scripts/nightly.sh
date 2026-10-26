@@ -24,6 +24,9 @@ DRY=0
 
 WT_ROOT="${REMOTEPAD_NIGHTLY_DIR:-$MAIN/.nightly}"
 WT="$WT_ROOT/work"
+# The worktree keeps its own local branch so it never collides with a `nightly`
+# branch the user may have checked out; it publishes to origin/nightly.
+LOCAL_BRANCH="nightly-ci"
 BRANCH="nightly"
 STAMP="$(date +%Y%m%d)"
 LOG="$WT_ROOT/nightly.log"
@@ -37,9 +40,9 @@ if [ ! -d "$WT" ]; then
   say "creating $WT"
   git -C "$MAIN" fetch --quiet origin
   if git -C "$MAIN" rev-parse --verify --quiet "refs/remotes/origin/$BRANCH" >/dev/null; then
-    git -C "$MAIN" worktree add --quiet --track -b "$BRANCH" "$WT" "origin/$BRANCH"
+    git -C "$MAIN" worktree add --quiet -b "$LOCAL_BRANCH" --track "$WT" "origin/$BRANCH"
   else
-    git -C "$MAIN" worktree add --quiet -b "$BRANCH" "$WT" origin/main
+    git -C "$MAIN" worktree add --quiet -b "$LOCAL_BRANCH" "$WT" origin/main
   fi
 fi
 
@@ -129,6 +132,6 @@ if [ "$DRY" = 1 ]; then
   exit 0
 fi
 
-git push --quiet origin "$BRANCH"
+git push --quiet origin "HEAD:$BRANCH"
 say "published $NIGHTLY_VERSION at $(git rev-parse --short HEAD)"
 [ -n "$SKIPPED" ] && say "skipped branches:$SKIPPED"
