@@ -85,12 +85,25 @@ export const CHANNELS: Array<{ name: ChannelName; branch: string }> = [
   { name: 'nightly', branch: 'nightly' },
 ];
 
-/** What channel a branch is: the three lanes, or a feature preview. */
-export function channelFor(branch: string | null): ChannelName | 'preview' | 'detached' {
+/**
+ * What lane a checkout is on.
+ *
+ * The branch name decides, except for a worktree branch (`helper/nightly`) that
+ * tracks a lane: the lane is what the user is actually running, so it wins over
+ * the local name. A preview of `main` reads as stable, and so on.
+ */
+export function channelFor(
+  branch: string | null,
+  upstream?: string | null,
+): ChannelName | 'preview' | 'detached' {
   if (!branch) return 'detached';
   if (branch === 'main') return 'stable';
   if (branch === 'dev') return 'dev';
   if (branch === 'nightly') return 'nightly';
+  const tracked = upstream?.replace(/^[^/]+\//, '');
+  if (tracked === 'main') return 'stable';
+  if (tracked === 'dev') return 'dev';
+  if (tracked === 'nightly') return 'nightly';
   return 'preview';
 }
 
@@ -115,8 +128,8 @@ export async function readUpdateStatus(repo: string, options: UpdateOptions = {}
   try {
     base.branch = (await git(repo, ['rev-parse', '--abbrev-ref', 'HEAD'])) || null;
     if (base.branch === 'HEAD') base.branch = null;
-    base.channel = channelFor(base.branch);
     base.upstream = await trackingRef(repo);
+    base.channel = channelFor(base.branch, base.upstream);
     base.head = await git(repo, ['rev-parse', 'HEAD']);
     // Untracked files (an editor's .vscode/, build leftovers) do not block a
     // fast-forward: git refuses by itself if the merge would overwrite one. Only

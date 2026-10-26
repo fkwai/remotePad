@@ -33,6 +33,12 @@ LOG="$WT_ROOT/nightly.log"
 
 mkdir -p "$WT_ROOT"
 
+# Merges create commits, and this runs unattended (systemd has no git identity).
+export GIT_AUTHOR_NAME="${GIT_AUTHOR_NAME:-nightly}"
+export GIT_AUTHOR_EMAIL="${GIT_AUTHOR_EMAIL:-nightly@remotePad.local}"
+export GIT_COMMITTER_NAME="${GIT_COMMITTER_NAME:-nightly}"
+export GIT_COMMITTER_EMAIL="${GIT_COMMITTER_EMAIL:-nightly@remotePad.local}"
+
 say() { printf '[nightly] %s\n' "$*"; }
 
 # A dedicated worktree: the live install stays on whatever branch the user chose.
@@ -77,9 +83,18 @@ for ref in origin/dev $(git for-each-ref --format='%(refname:short)' 'refs/remot
     say "merged $ref"
     MERGED="$MERGED $(basename "$ref")"
   else
-    say "CONFLICT in $ref — skipped, left for a human"
-    git merge --abort 2>/dev/null || true
-    SKIPPED="$SKIPPED $ref"
+    # A real conflict leaves unmerged paths; anything else (missing identity,
+    # unreadable object) is a failure of the run, not a branch to skip.
+    if [ -n "$(git diff --name-only --diff-filter=U)" ]; then
+      say "CONFLICT in $ref — skipped, left for a human"
+      git merge --abort 2>/dev/null || true
+      SKIPPED="$SKIPPED $ref"
+    else
+      say "merging $ref failed for a non-conflict reason:"
+      git merge --no-edit "$ref" 2>&1 | tail -5 | sed 's/^/[nightly]   /'
+      git merge --abort 2>/dev/null || true
+      exit 1
+    fi
   fi
 done
 

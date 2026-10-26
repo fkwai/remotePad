@@ -53,6 +53,15 @@ test.describe('channels', () => {
     expect(channelFor(null)).toBe('detached');
   });
 
+  test('a worktree branch reads as the lane it tracks', () => {
+    // This is what the nightly preview runs: local `helper/nightly`, remote
+    // `nightly`. The badge must say nightly, not "preview".
+    expect(channelFor('helper/nightly', 'origin/nightly')).toBe('nightly');
+    expect(channelFor('helper/stable-preview', 'origin/main')).toBe('stable');
+    expect(channelFor('helper/dev-preview', 'origin/dev')).toBe('dev');
+    expect(channelFor('helper/fs-copy', 'origin/helper/fs-copy')).toBe('preview');
+  });
+
   test('reports the upstream instead of guessing origin/<branch>', async () => {
     const f = fixture();
     const consumer = path.join(f.dir, 'consumer');
@@ -65,7 +74,7 @@ test.describe('channels', () => {
     const status = await readUpdateStatus(consumer, { fetch: true, forceFetch: true });
     expect(status.branch).toBe('helper/preview-name');
     expect(status.upstream).toBe('origin/nightly');
-    expect(status.channel).toBe('preview');
+    expect(status.channel).toBe('nightly');
     expect(status.behind).toBe(0);
     expect(status.remoteHead).toBe(f.git(f.seed, 'rev-parse', 'nightly'));
     // The old code produced this warning for a perfectly healthy branch.
