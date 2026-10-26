@@ -4,6 +4,10 @@ export interface UpdateStatus {
   /** Release version from the checkout's package.json (e.g. `0.0.1`). */
   version?: string;
   branch: string | null;
+  /** The lane this branch belongs to: stable (main), dev, nightly, or a preview. */
+  channel?: 'stable' | 'dev' | 'nightly' | 'preview' | 'detached';
+  /** The ref this branch tracks, e.g. `origin/nightly` (null when untracked). */
+  upstream?: string | null;
   head: string | null;
   remoteHead: string | null;
   /** Commits on origin/<branch> this checkout does not have. */
@@ -43,4 +47,34 @@ export interface PreviewInfo {
   apiPort?: number;
   /** The UI port answered a TCP connect just now. */
   alive: boolean;
+}
+
+/** One lane a runtime can follow (GET /api/channels). */
+export interface ChannelStatus {
+  name: 'stable' | 'dev' | 'nightly';
+  /** Branch behind the channel name. */
+  branch: string;
+  /** Current head of origin/<branch>, null when the remote branch is missing. */
+  head: string | null;
+  /** Commits on the channel this checkout does not have. */
+  behind: number;
+  /** Commits here that the channel does not have. */
+  ahead: number;
+  /** This checkout is on that branch. */
+  current: boolean;
+}
+
+/** Result of POST /api/channels (switching lane). */
+export interface ChannelResult {
+  ok: boolean;
+  switched: boolean;
+  channel?: string;
+  head?: string;
+  needsInstall?: boolean;
+  needsBuild?: boolean;
+  needsRestart?: boolean;
+  built?: boolean;
+  buildError?: string;
+  message: string;
+  status?: UpdateStatus;
 }

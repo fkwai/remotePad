@@ -291,6 +291,19 @@ input:focus { border-color: #4a7f73; }
 .version-error { color: #e08b8b; margin: 0 0 8px; }
 .version-warn { color: var(--muted); margin: 0 0 8px; }
 .version-actions { display: flex; justify-content: flex-end; }
+.version-channels { margin: 10px 0 0; }
+.version-channel {
+  display: flex; align-items: center; gap: 8px;
+  padding: 3px 0; font-size: 12px;
+}
+.version-channel-name { min-width: 58px; }
+.version-channel.current .version-channel-name { color: var(--accent); font-weight: 600; }
+.version-channel-meta {
+  flex: 1 1 auto; font-family: var(--mono); font-size: 11px; color: var(--muted);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.version-channel-go { font-size: 11px; padding: 1px 7px; }
+.version-note { margin: 8px 0 0; color: var(--accent); }
 .version-previews { margin: 10px 0 0; border-top: 1px solid var(--border); padding-top: 8px; }
 .version-previews-head {
   display: flex; align-items: center; gap: 6px;

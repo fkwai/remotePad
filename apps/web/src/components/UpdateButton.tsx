@@ -36,12 +36,14 @@ export function UpdateButton({ onToast }: { onToast: (msg: string) => void }) {
   if (status.behind === 0) {
     if (!status.head) return null;
     const short = status.head.slice(0, 7);
-    const name = status.branch ?? 'detached';
+    // The lane is what a user thinks in (stable / dev / nightly); the branch name
+    // alone read as "helper/nightly", which looks like an accident.
+    const name = status.channel && status.channel !== 'detached' ? status.channel : (status.branch ?? 'detached');
     const note = status.warning ? ` · ${status.warning}` : '';
     return (
       <span
         className="version-badge"
-        title={`${status.repo} · ${name} @ ${status.head}${note}`}
+        title={`${status.repo} · ${status.branch ?? 'detached'} @ ${status.head}${status.upstream ? ` · tracks ${status.upstream}` : ''}${note}`}
       >
         {name}@{short}
       </span>

@@ -31,3 +31,6 @@ playwright-report/
 .previews/
 # per-worktree settings (scripts/dev-worktree.sh)
 .dev/
+
+# nightly build worktree (scripts/nightly.sh)
+.nightly/
