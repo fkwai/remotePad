@@ -1126,7 +1126,13 @@ export function App() {
       if (msg.sessions) setAgentSessions(msg.sessions);
       if (msg.backend) setAgentBackend(msg.backend);
       setAgentChanges(msg.changes);
-      if (msg.sessionKey) agentSessionKeyRef.current = msg.sessionKey;
+      if (msg.sessionKey) {
+        const switched = agentSessionKeyRef.current && agentSessionKeyRef.current !== msg.sessionKey;
+        agentSessionKeyRef.current = msg.sessionKey;
+        // A review tab belongs to the conversation that produced it. Leaving it
+        // open after switching sessions showed another chat's diff in this one.
+        if (switched) setTabs((prev) => prev.filter((tab) => !tab.agentPath));
+      }
       setSessionRepos(msg.repos ?? []);
       setAgentSwitching(false);
       // Replace transcript on session switch, Local↔CatsCo switch, or CatsCo topic load.
