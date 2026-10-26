@@ -33,6 +33,16 @@ port_for() {
 
 dir_for() { printf '%s' "$PREVIEWS/$1"; }
 
+# Where a feature's worktree lives. Ask git first: running the script from inside
+# a worktree otherwise computes a path relative to that worktree.
+wt_path_for() {
+  local name="$1" found
+  found="$(git -C "$MAIN" worktree list --porcelain \
+    | awk -v b="refs/heads/helper/$name" '/^worktree /{p=$2} $0=="branch "b{print p}')"
+  if [ -n "$found" ]; then printf '%s' "$found"; return; fi
+  printf '%s' "${REMOTEPAD_WORKTREE_DIR:-$(dirname "$MAIN")/worktrees}/remotepad-$name"
+}
+
 pid_of_port() {
   local port="$1"
   ss -ltnpH "sport = :$port" 2>/dev/null | grep -oE 'pid=[0-9]+' | head -1 | cut -d= -f2
@@ -132,9 +142,7 @@ print(len(d.get("folders") if "folders" in d else d.get("repos") or []))' 2>/dev
 case "$ACTION" in
   sync)
     NAME="${2:?usage: $0 sync <feature>}"
-    WT_ROOT="${REMOTEPAD_WORKTREE_DIR:-$(cd "$ROOT/.." && pwd)/worktrees}"
-    mkdir -p "$WT_ROOT" 2>/dev/null || WT_ROOT="$ROOT/.worktrees"
-    WT="$WT_ROOT/remotepad-$NAME"
+    WT="$(wt_path_for "$NAME")"
     stop_one "$NAME" >/dev/null 2>&1 || true
     if [ -d "$WT" ]; then
       echo "updating $WT"
@@ -178,9 +186,9 @@ BASE="${2:-origin/main}"
 
 UI="$(port_for "$NAME" 0)"
 API="$(port_for "$NAME" 1)"
-WT_ROOT="${REMOTEPAD_WORKTREE_DIR:-$(cd "$ROOT/.." && pwd)/worktrees}"
-mkdir -p "$WT_ROOT" 2>/dev/null || WT_ROOT="$ROOT/.worktrees"
-WT="$WT_ROOT/remotepad-$NAME"
+WT="$(wt_path_for "$NAME")"
+WT_ROOT="$(dirname "$WT")"
+mkdir -p "$WT_ROOT" 2>/dev/null || true
 BRANCH="helper/$NAME"
 
 if [ ! -d "$WT" ]; then
