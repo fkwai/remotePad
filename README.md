@@ -132,18 +132,31 @@ not just the app.
 
 A plain link (no `?w=`) is the default window and behaves exactly as before.
 
-## Two lanes
+## Three lanes
 
-Small fixes and polish do not each need their own worktree. There are two lanes:
+One integration lane, one daily build, one release. You never need git to move
+between them: open the **RemotePad** wordmark and press **Switch** on a lane.
 
-| Lane | Where | For | How you see it |
+| Lane | Branch | For | How it reaches you |
 | --- | --- | --- | --- |
-| **nightly** | branch `nightly`, one long-running preview | everyday fixes, small behaviour changes | `scripts/preview.sh sync nightly`, then refresh the preview tab |
-| **feature** | worktree + PR | critical or risky changes | its own preview (`scripts/preview.sh <feature> origin/helper/<feature>`) |
+| **stable** | `main` | what you run day to day | **Update N** when `origin/main` moves |
+| **dev** | `dev` | small fixes and polish, merge freely | folded into the nightly build |
+| **nightly** | `nightly` | the tested daily build | `scripts/nightly.sh` at 03:00, or **Switch → nightly** |
 
-`main` stays the release channel: it moves when a nightly has been in use for a
-while, or when a feature PR merges. Nightly is rebased/fast-forwarded onto `main`
-so it never drifts far.
+Rules that keep this honest:
+
+- Small change → commit on `dev`, no worktree, no PR. It ships with tonight's build.
+- Risky or large change → its own worktree (`scripts/preview.sh <feature> origin/helper/<feature>`), test it, then merge into `dev`.
+- `scripts/nightly.sh` runs in its own worktree: it merges `main` + `dev` + every
+  `origin/helper/*` branch that merges cleanly, stamps `X.Y.Z-nightly.DATE`,
+  installs, builds and runs the whole suite. **Only a green run pushes.** A
+  conflicting feature branch is skipped and named, never silently dropped.
+- When a nightly has been good for a while, promote it: fast-forward `main` to
+  `nightly`, bump the version, tag, and delete the merged feature branches and
+  their worktrees. `dev` and `nightly` are then realigned on the new `main`.
+
+The version panel shows the lane, the branch and the ref it tracks, every lane's
+distance from here, and any previews running on the box.
 
 ## Development protocol
 

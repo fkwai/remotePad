@@ -133,7 +133,7 @@ If a job is about click / double-click / reveal / scroll, read this table first.
 | File **paste** | `Ctrl/Cmd+V` in a folder (tree row or Explorer) | menu: **Paste here** (only when something is on the clipboard); copies as `name copy.ext` when the name is taken |
 | Top bar **RemotePad** | right-click | window menu: Open new window · Copy link to this window · Open the default window |
 | Window | `?w=<id>` | own layout + own Agent host; no `?w=` is the default window |
-| Top bar **RemotePad** | click | version panel (`VersionPop.tsx`): release version, `branch@commit`, repo, tree, origin. There is no gesture manual popover any more. |
+| Top bar **RemotePad** | click | version panel (`VersionPop.tsx`): version, lane, `branch → upstream`, tree state, lane switcher, previews. No gesture manual. |
 | Agent **compose** | drop a file / paste an editor or terminal selection | insert a colored inline chip (`AgentComposer.tsx`, contenteditable); on send it expands to `[file]`/`[dir]`/`[term]` + absolute path (plus a fenced body for copies). No chip row above the input. |
 | Agent **transcript** | assistant text | rendered as GitHub-flavoured markdown (`agent-md`); user text keeps `[file]` refs as chips with collapsed code |
 | Agent **tab** | right-click | Open session JSONL · Rename · Close |
@@ -163,9 +163,12 @@ Work on a branch in this checkout when the user asks to persist. Branch naming f
 
 ## Lanes
 
-- **nightly** — `nightly` branch plus one long-running preview on the user's box. Everyday fixes land here: commit, `git push origin nightly`, `./scripts/preview.sh sync nightly`. No worktree-per-fix.
-- **feature** — a worktree and a PR, for critical or risky work. `./scripts/preview.sh <feature> origin/helper/<feature>`.
-- **main** — release channel. Runtimes update from it with **Update N**.
+- **stable** — `main`. Release channel; runtimes update with **Update N**.
+- **dev** — small fixes land here directly (`commit → push origin dev`). No worktree, no PR.
+- **nightly** — `scripts/nightly.sh` (systemd timer `remotepad-nightly.timer`, 03:00) merges `main` + `dev` + clean `origin/helper/*`, stamps `X.Y.Z-nightly.DATE`, builds, runs the full suite, and pushes only when green.
+- **feature** — a worktree for risky work: `./scripts/preview.sh <feature> origin/helper/<feature>`, then merge into `dev`.
+- Promotion: `git switch main && git merge --ff-only origin/nightly`, bump the version, tag, then delete merged branches/worktrees and realign `dev`/`nightly` on `main`.
+- Switching lane in the UI: `POST /api/channels {channel}` — clean tree required, fast-forward only, rebuilds the web dist, reports install/restart needs.
 
 ## Development (agents)
 
