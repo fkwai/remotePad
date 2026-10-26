@@ -19,12 +19,18 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ACTION="${1:-}"
 
+# State lives next to the main checkout, not the worktree the script runs from:
+# start/stop/check must agree, and a preview runs inside its own worktree.
+MAIN="$(git -C "$ROOT" rev-parse --path-format=absolute --git-common-dir 2>/dev/null | xargs -r dirname || true)"
+[ -n "${MAIN:-}" ] || MAIN="$ROOT"
+PREVIEWS="$MAIN/.previews"
+
 port_for() {
   local name="$1" offset="$2"
   printf '%s' "$(( 6100 + ($(printf '%s' "$name" | cksum | cut -d' ' -f1) % 90) * 2 + offset ))"
 }
 
-dir_for() { printf '%s' "$ROOT/.previews/$1"; }
+dir_for() { printf '%s' "$PREVIEWS/$1"; }
 
 pid_of_port() {
   local port="$1"
@@ -124,7 +130,7 @@ case "$ACTION" in
     ;;
   status)
     found=0
-    for dir in "$ROOT"/.previews/*/; do
+    for dir in "$PREVIEWS"/*/; do
       [ -d "$dir" ] || continue
       name="$(basename "$dir")"
       ui="$(cat "$dir/ui" 2>/dev/null || echo '?')"
