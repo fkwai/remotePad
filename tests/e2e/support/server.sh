@@ -19,5 +19,8 @@ export REMOTEPAD_AGENT_SESSIONS="$STATE/agent-sessions"
 # Cloud chat vs the stand-in Dashboard (tests/e2e/support/fake-dashboard.mjs), so
 # the CatsCo round tests exercise the real poll path.
 export REMOTEPAD_CATSCO_DASHBOARD="http://127.0.0.1:3871"
+# Shorter settle windows so the round tests do not wait 20s for a step tail.
+export REMOTEPAD_QUIET_MS=1500
+export REMOTEPAD_TOOL_QUIET_MS=2500
 
 exec "$ROOT/apps/server/node_modules/.bin/tsx" "$ROOT/apps/server/src/index.ts"

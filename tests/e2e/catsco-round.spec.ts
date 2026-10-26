@@ -71,3 +71,38 @@ test.describe('catsco round', () => {
     await expect(page.locator('.agent-compose-row button.primary')).toBeVisible({ timeout: 20_000 });
   });
 });
+
+test.describe('catsco round ending on a step', () => {
+  test('a round whose last row is a step still hands the input box back', async ({ page }) => {
+    // Real rounds often end right after a tool result — no closing prose. That is
+    // the case where Stop stayed on, because only an assistant text tail was
+    // watched.
+    // The Dashboard stores a step as a row with a tool_result block, not as
+    // role:"tool" — matching the real shape is the point of this test.
+    const ask2 = { id: 11, role: 'user', from_uid: 1, content: 'run it' };
+    const step2 = {
+      id: 12,
+      role: 'assistant',
+      from_uid: 2,
+      content: 'Command completed\nstatus: succeeded',
+      content_blocks: [{
+        type: 'tool_result',
+        name: 'execute_shell',
+        content: 'Command completed\nstatus: succeeded',
+      }],
+    };
+    setCloud({ taskState: 'running', messages: [ask2, step2] });
+
+    await gotoApp(page);
+
+    const send = page.locator('.agent-compose-row button.primary');
+    const stop = page.locator('.agent-compose-row button.danger');
+
+    // Nothing more will arrive: the round is over even though the cloud says running.
+    await expect(send).toBeVisible({ timeout: 20_000 });
+    await expect(stop).toHaveCount(0);
+    await page.locator('.agent-compose-editor').click();
+    await page.keyboard.type('again');
+    await expect(page.locator('.agent-compose-editor')).toContainText('again');
+  });
+});

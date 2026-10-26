@@ -22,7 +22,13 @@ import {
   type CatsCoConversation,
 } from '../catsco-chat.ts';
 import { ChangeTracker } from './changes.ts';
-import { settleConversation, turnIsOpen, watchQuiet, type QuietWatch } from './catsco-settle.ts';
+import {
+  QUIET_MS, TOOL_QUIET_MS, settleConversation, turnIsOpen, watchQuiet, type QuietWatch,
+} from './catsco-settle.ts';
+
+/** Windows are configurable so tests can prove the settle without a 20s wait. */
+const QUIET = Number(process.env.REMOTEPAD_QUIET_MS || QUIET_MS);
+const TOOL_QUIET = Number(process.env.REMOTEPAD_TOOL_QUIET_MS || TOOL_QUIET_MS);
 import { TurnSnapshot } from './turn-snapshot.ts';
 import {
   agentSessionFile,
@@ -1360,7 +1366,9 @@ export class AgentHost {
 
       // Mirror the cloud's view into our own status so the panel and the watch
       // agree, even for a turn started from another device.
-      if (!this.sending && cloudWorking && this.status !== 'running') {
+      // ...but not after we settled this turn: the cloud keeps saying running and
+      // would flip the panel back to Stop on every poll.
+      if (!this.sending && cloudWorking && !this.catscoQuietDone && this.status !== 'running') {
         this.status = 'running';
         this.emit({ type: 'status', state: 'running' });
       }
@@ -1374,11 +1382,11 @@ export class AgentHost {
         try {
           const newest = await fetchCatsCoMessages(this.catscoTopic, this.catscoUserUid, 1);
           const tail = newest[newest.length - 1];
-          const watch = watchQuiet(this.catscoQuiet, tail, Date.now());
+          const watch = watchQuiet(this.catscoQuiet, tail, Date.now(), QUIET, TOOL_QUIET);
           this.catscoQuiet = watch.state;
-          // A tool row (or the user's own message) at the tail proves the turn is
-          // still open: forget an earlier settle so the next answer is watched
-          // from scratch instead of being declared done on sight.
+          // A user row at the tail means the round has not begun (or is ours, on
+          // screen): forget an earlier settle so the next answer is watched from
+          // scratch instead of being declared done on sight.
           if (!watch.state) this.catscoQuietDone = false;
           if (watch.settled && !this.catscoQuietDone) {
             this.catscoQuietDone = true;
