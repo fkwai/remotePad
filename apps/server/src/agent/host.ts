@@ -22,6 +22,7 @@ import {
   type CatsCoConversation,
 } from '../catsco-chat.ts';
 import { ChangeTracker } from './changes.ts';
+import { settleConversation } from './catsco-settle.ts';
 import { TurnSnapshot } from './turn-snapshot.ts';
 import {
   agentSessionFile,
@@ -751,6 +752,8 @@ export class AgentHost {
    *  the cloud still reports as the task state. Group topics otherwise stay
    *  "running" forever and the panel keeps offering Stop. */
   private catscoFinalSeq = 0;
+  /** Last conversation list sent to the panel, so a turn can settle it. */
+  private catscoConversations: CatsCoConversation[] = [];
   private catscoTitle = '';
   private catscoUserUid = '';
   /** One tracker per session: a file touched by one chat must not show in another. */
@@ -1272,10 +1275,7 @@ export class AgentHost {
       this.agentSettle = setTimeout(() => {
         this.agentSettle = null;
         if (this.agentTailTopic !== topicId) return;
-        if (this.status === 'running') {
-          this.status = 'idle';
-          this.emit({ type: 'status', state: 'idle', message: 'session-file' });
-        }
+        this.settleCatsCoTurn('session-file');
       }, 2000);
       this.agentSettle.unref?.();
     }
@@ -1358,6 +1358,34 @@ export class AgentHost {
     return rows.map(toHistoryItem);
   }
 
+  /**
+   * The turn is over: unlock the panel and drop the stale "working" flag.
+   *
+   * The cloud's task_status can lag behind the answer (and a local-only runtime
+   * never polls it), which left the Stop button on after the reply landed.
+   */
+  private settleCatsCoTurn(message: string): void {
+    if (this.backend !== 'catsco') return;
+    const next = settleConversation(this.catscoConversations, this.catscoTopic);
+    if (next !== this.catscoConversations) {
+      this.catscoConversations = next;
+      this.emit({
+        type: 'catsco_list',
+        bots: this.catscoBots.map((bot) => ({ uid: bot.uid, name: bot.name, isCurrent: bot.isCurrent })),
+        projects: this.catscoProjects,
+        conversations: next,
+        topicId: this.catscoTopic || undefined,
+        userUid: this.catscoUserUid || undefined,
+        ready: Boolean(this.catscoTopic),
+        error: this.error,
+      });
+    }
+    if (!this.sending && this.status === 'running') {
+      this.status = 'idle';
+      this.emit({ type: 'status', state: 'idle', message });
+    }
+  }
+
   /** A turn whose closing text already landed is not running any more. */
   private settleTurn(conversations: CatsCoConversation[]): CatsCoConversation[] {
     if (!this.catscoFinalSeq || !this.catscoTopic) return conversations;
@@ -1378,6 +1406,7 @@ export class AgentHost {
     listError?: string,
   ): void {
     const settled = this.settleTurn(conversations);
+    this.catscoConversations = settled;
     this.emit({
       type: 'catsco_list',
       bots: bots.map((bot) => ({ uid: bot.uid, name: bot.name, isCurrent: bot.isCurrent })),

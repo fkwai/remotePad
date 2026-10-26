@@ -1,10 +1,23 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import fs from 'node:fs';
+import path from 'node:path';
 import type { UpdateResult, UpdateStatus } from '@remotepad/shared';
 
 const run = promisify(execFile);
 
 const INSTALL_FILES = ['package.json', 'pnpm-lock.yaml'];
+
+/** Release version, read from the checkout's own package.json. */
+export function readVersion(repo: string): string | undefined {
+  try {
+    const raw = fs.readFileSync(path.join(repo, 'package.json'), 'utf8');
+    const parsed = JSON.parse(raw) as { version?: string };
+    return typeof parsed.version === 'string' ? parsed.version : undefined;
+  } catch {
+    return undefined;
+  }
+}
 
 export interface ChangeImpact {
   files: string[];
@@ -59,8 +72,8 @@ export interface UpdateOptions {
 export async function readUpdateStatus(repo: string, options: UpdateOptions = {}): Promise<UpdateStatus> {
   const checkedAt = new Date().toISOString();
   const base: UpdateStatus = {
-    repo, branch: null, head: null, remoteHead: null, behind: 0, ahead: 0,
-    dirty: false, canUpdate: false, checkedAt,
+    repo, version: readVersion(repo), branch: null, head: null, remoteHead: null,
+    behind: 0, ahead: 0, dirty: false, canUpdate: false, checkedAt,
   };
 
   try {

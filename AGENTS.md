@@ -129,6 +129,7 @@ If a job is about click / double-click / reveal / scroll, read this table first.
 | Folder explorer item | double-click / menu Open | file → open in Editor; dir → navigate Explorer |
 | Folder explorer selection | right-click menu / Del | Download (files) · Delete |
 | Editor tab / body menu | Revert | discard dirty buffer; `git restore` to HEAD when in a repo, then reload from disk |
+| Top bar **RemotePad** | click | version panel (`VersionPop.tsx`): release version, `branch@commit`, repo, tree, origin. There is no gesture manual popover any more. |
 | Agent **compose** | drop a file / paste an editor or terminal selection | insert a colored inline chip (`AgentComposer.tsx`, contenteditable); on send it expands to `[file]`/`[dir]`/`[term]` + absolute path (plus a fenced body for copies). No chip row above the input. |
 | Agent **transcript** | assistant text | rendered as GitHub-flavoured markdown (`agent-md`); user text keeps `[file]` refs as chips with collapsed code |
 | Agent **tab** | right-click | Open session JSONL · Rename · Close |

@@ -253,9 +253,12 @@ The file tree starts at `/`. Allowed paths include `/` plus `$HOME`, the process
 
 ## How to use
 
+RemotePad is at **0.0.1**; the top bar always reports the running build
+(`v0.0.1 · branch@commit` next to the wordmark).
+
 **Click** and **drag** are the basics. For everything else, **right-click** — menus list the action and show the hotkey or gesture on the right (e.g. `Dbl-click`, `Shift+Enter`).
 
-Click **RemotePad** in the top-left for the full help list. Common shortcuts (also shown on menus):
+Click **RemotePad** in the top-left for the version panel: release version, branch and commit, repo path, tree state, and how far behind origin this install is. Common shortcuts (also shown on menus):
 
 - `Ctrl/Cmd+S` save
 - `Ctrl/Cmd+L` source / rendered · click the address bar, `Enter` opens the path

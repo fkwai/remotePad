@@ -273,7 +273,24 @@ input:focus { border-color: #4a7f73; }
   box-shadow: var(--shadow);
   border-radius: 8px;
 }
-.help-pop { left: 10px; }
+.version-pop { left: 10px; width: 340px; }
+.version-body { padding: 10px 12px 12px; font-size: 12px; }
+.version-title {
+  display: flex; align-items: baseline; gap: 8px;
+  font-size: 15px; font-weight: 600; margin-bottom: 8px;
+}
+.version-branch {
+  font-family: var(--mono); font-size: 11px; font-weight: 400; color: var(--muted);
+}
+.version-rows { display: grid; grid-template-columns: 62px 1fr; gap: 4px 10px; margin: 0 0 8px; }
+.version-rows dt { color: var(--muted); }
+.version-rows dd {
+  margin: 0; font-family: var(--mono); font-size: 11px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.version-error { color: #e08b8b; margin: 0 0 8px; }
+.version-warn { color: var(--muted); margin: 0 0 8px; }
+.version-actions { display: flex; justify-content: flex-end; }
 .host-pop { right: 10px; }
 .host-pop .info-pane, .host-pop .info-wrap { height: auto; }
 .float-pop-head {
