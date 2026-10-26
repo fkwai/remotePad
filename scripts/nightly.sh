@@ -48,10 +48,10 @@ fi
 
 cd "$WT"
 
-if [ -n "$(git status --porcelain --untracked-files=no)" ]; then
-  say "resetting leftovers from an interrupted run"
-  git reset --hard --quiet "origin/$BRANCH" 2>/dev/null || git reset --hard --quiet
-fi
+# Always start from what is published: this worktree is disposable, and a failed
+# or dry run must not leave commits that break the next night's fast-forward.
+say "reset to origin/$BRANCH"
+git reset --hard --quiet "origin/$BRANCH" 2>/dev/null || say "origin/$BRANCH missing, starting from the current head"
 
 say "fetching"
 git fetch --quiet --prune origin
@@ -98,15 +98,6 @@ for path in ['package.json', 'apps/web/package.json', 'apps/server/package.json'
 print(f'version {version}')
 PY
 
-if [ -n "$(git status --porcelain --untracked-files=no)" ]; then
-  git add -A
-  git -c user.name="${GIT_AUTHOR_NAME:-nightly}" -c user.email="${GIT_AUTHOR_EMAIL:-nightly@remotePad.local}" \
-    commit --quiet -m "nightly $STAMP
-
-merged:$MERGED${SKIPPED:+
-skipped:$SKIPPED}"
-fi
-
 say "installing"
 if ! npx -y pnpm@10.15.0 install --frozen-lockfile >/dev/null 2>&1; then
   say "install failed"
@@ -128,8 +119,19 @@ fi
 say "tests passed: $(grep -Eo '[0-9]+ passed' "$LOG" | tail -1)"
 
 if [ "$DRY" = 1 ]; then
-  say "dry run: not pushing $BRANCH"
+  say "dry run: not committing or pushing $BRANCH"
   exit 0
+fi
+
+# The version stamp is committed only now: a failed night leaves nothing behind
+# that the next run would have to reconcile.
+if [ -n "$(git status --porcelain --untracked-files=no)" ]; then
+  git add -A
+  git -c user.name="${GIT_AUTHOR_NAME:-nightly}" -c user.email="${GIT_AUTHOR_EMAIL:-nightly@remotePad.local}" \
+    commit --quiet -m "nightly $STAMP
+
+merged:$MERGED${SKIPPED:+
+skipped:$SKIPPED}"
 fi
 
 git push --quiet origin "HEAD:$BRANCH"
