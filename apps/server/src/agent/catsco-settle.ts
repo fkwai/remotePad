@@ -26,6 +26,12 @@ export function settleConversation(
 
 /** How long the transcript must stay unchanged before a turn counts as done. */
 export const QUIET_MS = 6000;
+/**
+ * A step (tool_use / tool_result) at the tail also ends a round — often the last
+ * thing the agent writes. Steps take longer than prose to finish, so they get a
+ * wider window, but they must not be ignored: that is exactly how Stop stayed on.
+ */
+export const TOOL_QUIET_MS = 20_000;
 
 export interface QuietWatch {
   /** Message id last seen at the tail of the transcript. */
@@ -47,10 +53,15 @@ export function watchQuiet(
   tail: { id: number; role: string; text: string } | undefined,
   now: number,
   quietMs = QUIET_MS,
+  toolQuietMs = TOOL_QUIET_MS,
 ): { state: QuietWatch | null; settled: boolean } {
-  if (!tail || tail.role !== 'assistant' || !tail.text.trim()) return { state: null, settled: false };
+  if (!tail) return { state: null, settled: false };
+  const isAnswer = tail.role === 'assistant' && Boolean(tail.text.trim());
+  const isStep = tail.role === 'tool';
+  // A user row means the turn has not started yet (or is ours, already on screen).
+  if (!isAnswer && !isStep) return { state: null, settled: false };
   if (!prev || prev.id !== tail.id) return { state: { id: tail.id, since: now }, settled: false };
-  return { state: prev, settled: now - prev.since >= quietMs };
+  return { state: prev, settled: now - prev.since >= (isAnswer ? quietMs : toolQuietMs) };
 }
 
 /**

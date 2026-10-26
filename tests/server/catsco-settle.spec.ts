@@ -67,8 +67,17 @@ test.describe('transcript quiet watch', () => {
     expect(next.state).toEqual({ id: 43, since: 5_000 });
   });
 
-  test('a trailing tool row or user message is not an answer', () => {
-    expect(watchQuiet(null, { id: 1, role: 'tool', text: 'x' }, 0).state).toBeNull();
+  test('a trailing tool row is a step that can end the round', () => {
+    // A round often ends right after a step, with no closing prose.
+    const first = watchQuiet(null, { id: 1, role: 'tool', text: 'Command completed' }, 1_000);
+    expect(first.state).toEqual({ id: 1, since: 1_000 });
+
+    // Steps are slower than prose: 6s is not enough, 20s is.
+    expect(watchQuiet(first.state, { id: 1, role: 'tool', text: 'x' }, 7_000).settled).toBe(false);
+    expect(watchQuiet(first.state, { id: 1, role: 'tool', text: 'x' }, 21_000).settled).toBe(true);
+  });
+
+  test('a user row means no round is open', () => {
     expect(watchQuiet(null, { id: 2, role: 'user', text: 'x' }, 0).state).toBeNull();
     expect(watchQuiet(null, { id: 3, role: 'assistant', text: '  ' }, 0).state).toBeNull();
     expect(watchQuiet(null, undefined, 0).settled).toBe(false);
