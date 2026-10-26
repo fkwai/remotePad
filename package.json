@@ -1,7 +1,7 @@
 {
   "name": "remotepad",
   "private": true,
-  "version": "0.0.3",
+  "version": "0.0.3-nightly.20261026",
   "description": "RemotePad \u2014 a lightweight control surface for remote development.",
   "scripts": {
     "dev": "pnpm --parallel --filter @remotepad/server --filter @remotepad/web dev",
