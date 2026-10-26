@@ -159,6 +159,12 @@ If a job is about click / double-click / reveal / scroll, read this table first.
 Work on a branch in this checkout when the user asks to persist. Branch naming for feature work: `helper/<feature>` from `scripts/dev-worktree.sh`. Never push `main`, never force-push.
 
 
+## Lanes
+
+- **nightly** — `nightly` branch plus one long-running preview on the user's box. Everyday fixes land here: commit, `git push origin nightly`, `./scripts/preview.sh sync nightly`. No worktree-per-fix.
+- **feature** — a worktree and a PR, for critical or risky work. `./scripts/preview.sh <feature> origin/helper/<feature>`.
+- **main** — release channel. Runtimes update from it with **Update N**.
+
 ## Development (agents)
 
 The checkout the user is working in runs the product. Never restart it, never

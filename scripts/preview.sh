@@ -5,6 +5,7 @@
 #   scripts/preview.sh stop <feature>
 #   scripts/preview.sh status
 #   scripts/preview.sh check <feature>     # smoke the endpoints the UI calls
+#   scripts/preview.sh sync <feature>      # pull the branch, rebuild, restart
 #
 # The preview never touches the instance the user is working in:
 #   - its own worktree (helper/<feature>), own node_modules
@@ -120,6 +121,21 @@ check_one() {
 }
 
 case "$ACTION" in
+  sync)
+    NAME="${2:?usage: $0 sync <feature>}"
+    WT_ROOT="${REMOTEPAD_WORKTREE_DIR:-$(cd "$ROOT/.." && pwd)/worktrees}"
+    mkdir -p "$WT_ROOT" 2>/dev/null || WT_ROOT="$ROOT/.worktrees"
+    WT="$WT_ROOT/remotepad-$NAME"
+    stop_one "$NAME" >/dev/null 2>&1 || true
+    if [ -d "$WT" ]; then
+      echo "updating $WT"
+      git -C "$WT" pull -q --ff-only || { echo "pull failed — resolve it in $WT" >&2; exit 1; }
+      git -C "$WT" log --oneline -1
+    else
+      echo "no worktree for $NAME — starting a fresh one" >&2
+    fi
+    exec "$0" "$NAME"
+    ;;
   check)
     check_one "${2:?usage: $0 check <feature>}"
     exit $?

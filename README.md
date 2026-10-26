@@ -132,6 +132,19 @@ not just the app.
 
 A plain link (no `?w=`) is the default window and behaves exactly as before.
 
+## Two lanes
+
+Small fixes and polish do not each need their own worktree. There are two lanes:
+
+| Lane | Where | For | How you see it |
+| --- | --- | --- | --- |
+| **nightly** | branch `nightly`, one long-running preview | everyday fixes, small behaviour changes | `scripts/preview.sh sync nightly`, then refresh the preview tab |
+| **feature** | worktree + PR | critical or risky changes | its own preview (`scripts/preview.sh <feature> origin/helper/<feature>`) |
+
+`main` stays the release channel: it moves when a nightly has been in use for a
+while, or when a feature PR merges. Nightly is rebased/fast-forwarded onto `main`
+so it never drifts far.
+
 ## Development protocol
 
 The install you are working in is live. Nothing below restarts it, writes to it,

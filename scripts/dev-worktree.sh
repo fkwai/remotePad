@@ -40,6 +40,11 @@ E2E_UI=$(( 5100 + SEED ))
 
 mkdir -p "$WT_ROOT"
 git -C "$ROOT" worktree add -q "$WT" -b "$BRANCH" "$BASE"
+# When the base is a remote branch, track it: `git -C $WT pull --ff-only` then
+# refreshes the worktree, which is how a nightly preview stays current.
+case "$BASE" in
+  origin/*) git -C "$WT" branch -q --set-upstream-to="$BASE" ;;
+esac
 
 mkdir -p "$WT/.dev"
 cat > "$WT/.dev/settings.json" <<JSON
