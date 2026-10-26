@@ -1,6 +1,6 @@
 {
   "name": "@remotepad/shared",
-  "version": "0.0.3-nightly.20261026",
+  "version": "0.0.3-nightly.20261027",
   "private": true,
   "type": "module",
   "main": "./src/index.ts",
