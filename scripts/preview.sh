@@ -4,6 +4,7 @@
 #   scripts/preview.sh <feature> [base-ref]   # create/reuse worktree, start it
 #   scripts/preview.sh stop <feature>
 #   scripts/preview.sh status
+#   scripts/preview.sh check <feature>     # smoke the endpoints the UI calls
 #
 # The preview never touches the instance the user is working in:
 #   - its own worktree (helper/<feature>), own node_modules
@@ -64,7 +65,59 @@ stop_one() {
   echo "preview '$name' stopped"
 }
 
+# Endpoints the UI hits on load, plus the files it offers to open. A fresh
+# profile has none of those files, which is where a 500 used to hide.
+check_one() {
+  local name="$1" dir ui api fail=0 code body control
+  dir="$(dir_for "$name")"
+  if [ ! -d "$dir" ]; then
+    echo "no preview named $name — is it running? (scripts/preview.sh status)" >&2
+    return 1
+  fi
+  ui="$(cat "$dir/ui" 2>/dev/null || echo)" 
+  api="$(cat "$dir/api" 2>/dev/null || echo)"
+  if [ -z "$ui" ] || [ -z "$api" ]; then
+    echo "preview '$name' has no ports recorded" >&2
+    return 1
+  fi
+  echo "checking preview '$name' — ui $ui · api $api"
+
+  for path in / /api/machine /api/favorites /api/repos /api/session /api/modules /api/update /api/previews; do
+    if [ "$path" = / ]; then
+      code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 "http://127.0.0.1:$ui/")
+    else
+      code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 "http://127.0.0.1:$api$path")
+    fi
+    printf '  %-16s %s\n' "$path" "$code"
+    case "$code" in 2*|3*) ;; *) fail=1 ;; esac
+  done
+
+  # The repos control file: the panel offers it, so a fresh profile must have it.
+  control=$(curl -s --max-time 10 "http://127.0.0.1:$api/api/repos" \
+    | python3 -c 'import json,sys; print(json.load(sys.stdin).get("controlPath",""))' 2>/dev/null || true)
+  if [ -n "$control" ]; then
+    code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 \
+      "http://127.0.0.1:$api/api/fs/read?path=$(python3 -c 'import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1]))' "$control")")
+    printf '  %-16s %s (%s)\n' 'fs/read control' "$code" "$control"
+    case "$code" in 2*) ;; *) fail=1 ;; esac
+  else
+    echo "  fs/read control   (no controlPath reported)"
+    fail=1
+  fi
+
+  if [ "$fail" = 0 ]; then
+    echo "preview '$name': OK"
+  else
+    echo "preview '$name': FAILED — see $dir/*.log" >&2
+  fi
+  return "$fail"
+}
+
 case "$ACTION" in
+  check)
+    check_one "${2:?usage: $0 check <feature>}"
+    exit $?
+    ;;
   stop)
     stop_one "${2:?usage: $0 stop <feature>}"
     exit 0
@@ -84,7 +137,7 @@ case "$ACTION" in
     exit 0
     ;;
   ""|-h|--help)
-    sed -n '2,16p' "$0" | sed 's/^# \{0,1\}//'
+    sed -n '2,17p' "$0" | sed 's/^# \{0,1\}//'
     exit 1
     ;;
 esac
