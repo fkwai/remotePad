@@ -4,6 +4,7 @@ import { api, downloadFile } from '../api';
 import { fileMark } from '../files';
 import { setEntryDrag } from '../dnd';
 import { ContextMenu, type MenuState } from './ContextMenu';
+import { pasteTargetFor, pasteWouldClash, useFileClipboard } from '../fileClipboard';
 
 const ROW = 22;
 
@@ -30,6 +31,8 @@ export function FileTree({
   onAddRepo,
   onRemoveRepo,
   onGoUp,
+  onCopyFiles,
+  onPasteFiles,
   pendingPaths,
 }: {
   roots: string[];
@@ -54,6 +57,10 @@ export function FileTree({
   onAddRepo: (path: string) => void;
   onRemoveRepo: (path: string) => void;
   onGoUp: () => void;
+  /** Put the selection on the file clipboard (copy or cut). */
+  onCopyFiles: (paths: string[], mode: 'copy' | 'cut') => void;
+  /** Paste the file clipboard into a folder. */
+  onPasteFiles: (into: string) => void;
   pendingPaths?: Set<string>;
 }) {
   const [searchOpen, setSearchOpen] = useState(false);
@@ -139,9 +146,55 @@ export function FileTree({
       setDraftName(entry.name);
     } else if (action === 'delete') {
       setConfirm(entry);
+    } else if (action === 'copy' || action === 'cut') {
+      onCopyFiles([entry.path], action);
+    } else if (action === 'paste') {
+      onPasteFiles(dir);
     } else if (action === 'term') {
       onTerminal(dir);
     }
+  }
+
+  const clip = useFileClipboard();
+
+  // Keyboard parity with the menus. Scoped to the tree: Ctrl+C in the editor must
+  // keep copying text, so editable targets are left alone.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!(e.ctrlKey || e.metaKey)) return;
+      const target = e.target as HTMLElement | null;
+      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) return;
+      const inTree = bodyRef.current?.contains(target as Node)
+        || bodyRef.current?.contains(document.activeElement);
+      if (!inTree) return;
+      const key = e.key.toLowerCase();
+      if (key === 'c' || key === 'x') {
+        if (!selected) return;
+        e.preventDefault();
+        onCopyFiles([selected], key === 'c' ? 'copy' : 'cut');
+        return;
+      }
+      if (key === 'v' && clip) {
+        const into = selected
+          ? pasteTargetFor(selected, entriesFor(selected))
+          : treeRoot;
+        if (pasteWouldClash(clip.paths, into)) return;
+        e.preventDefault();
+        onPasteFiles(into);
+      }
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [selected, clip, treeRoot, onCopyFiles, onPasteFiles]);
+
+  /** Is this path a folder? The tree knows through its own listings. */
+  function entriesFor(path: string): boolean {
+    if (listings[path]) return true;
+    for (const rows of Object.values(listings)) {
+      const hit = rows.find((row) => row.path === path);
+      if (hit) return hit.kind === 'dir';
+    }
+    return true;
   }
 
   const showUp = treeRoot !== '/';

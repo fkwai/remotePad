@@ -2,6 +2,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import type { FastifyInstance } from 'fastify';
 import type { FsEntry, FsKind, FsReadResponse } from '@remotepad/shared';
+import { copyInto } from '../fs-copy.ts';
 import { PathError, exists, resolveSafe, uniqueRoots } from '../paths.ts';
 
 const IMAGE_EXT = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg', '.bmp', '.ico']);
@@ -133,6 +134,27 @@ export async function registerFsRoutes(app: FastifyInstance) {
     await fs.mkdir(path.dirname(target), { recursive: true });
     await fs.writeFile(target, '', { flag: 'wx' });
     return { path: target, ok: true };
+  });
+
+  app.post<{
+    Body: { from?: string; into?: string; as?: string };
+  }>('/api/fs/copy', async (req) => {
+    const from = resolveSafe(req.body?.from || '');
+    const into = resolveSafe(req.body?.into || '');
+    const as = typeof req.body?.as === 'string' ? req.body.as.trim() : '';
+    if (as && (as.includes('/') || as === '.' || as === '..')) {
+      throw new PathError('Name cannot contain /', 400);
+    }
+    try {
+      return { ...(await copyInto({ from, into, as: as || undefined })), ok: true };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      // A paste onto an existing name is a normal outcome, not a crash.
+      if (/already exists/i.test(message) || (err as { code?: string }).code === 'EEXIST') {
+        throw new PathError('Already exists', 409);
+      }
+      throw new PathError(message, 400);
+    }
   });
 
   app.post<{ Body: { from?: string; to?: string } }>('/api/fs/rename', async (req) => {

@@ -32,6 +32,8 @@ export function LeftSidebar({
   onAddRepo,
   onRemoveRepo,
   onReveal,
+  onCopyFiles,
+  onPasteFiles,
   onClearRepo,
   onGoUp,
   onOpenControl,
@@ -65,6 +67,8 @@ export function LeftSidebar({
   onAddRepo: (path: string) => void;
   onRemoveRepo: (path: string) => void;
   onReveal: (path: string, asRepo?: boolean) => void;
+  onCopyFiles: (paths: string[], mode: 'copy' | 'cut') => void;
+  onPasteFiles: (into: string) => void;
   onClearRepo: () => void;
   onGoUp: () => void;
   onOpenControl: () => void;
@@ -120,6 +124,8 @@ export function LeftSidebar({
           onAddRepo={onAddRepo}
           onRemoveRepo={onRemoveRepo}
           onGoUp={onGoUp}
+          onCopyFiles={onCopyFiles}
+          onPasteFiles={onPasteFiles}
           pendingPaths={pendingPaths}
         />
       </Panel>

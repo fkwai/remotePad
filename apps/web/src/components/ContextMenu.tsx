@@ -1,5 +1,6 @@
 import { useLayoutEffect, useRef, useState } from 'react';
 import type { FsEntry } from '@remotepad/shared';
+import { pasteTargetFor, pasteWouldClash, useFileClipboard } from '../fileClipboard';
 
 export interface MenuState {
   x: number;
@@ -95,6 +96,8 @@ export function ContextMenu({
   inRepo: boolean;
 }) {
   const isDir = menu.entry.kind === 'dir';
+  const clip = useFileClipboard();
+  const canPaste = Boolean(clip) && !pasteWouldClash(clip!.paths, pasteTargetFor(menu.entry.path, isDir));
   const items: MenuItem[] = [
     ...(isDir
       ? [
@@ -105,6 +108,11 @@ export function ContextMenu({
         { type: 'item' as const, id: 'open-keep', label: 'Keep tab open', hint: 'Dbl-click' },
       ]),
     { type: 'item', id: 'copy-path', label: 'Copy full path' },
+    { type: 'sep' },
+    { type: 'item', id: 'copy', label: 'Copy', hint: 'Ctrl/⌘+C' },
+    { type: 'item', id: 'cut', label: 'Cut', hint: 'Ctrl/⌘+X' },
+    ...(canPaste ? [{ type: 'item' as const, id: 'paste', label: 'Paste here', hint: 'Ctrl/⌘+V' }] : []),
+    { type: 'sep' },
     ...(isDir ? [] : [{ type: 'item' as const, id: 'download', label: 'Download' }]),
     { type: 'sep' },
     ...(isDir

@@ -129,6 +129,8 @@ If a job is about click / double-click / reveal / scroll, read this table first.
 | Folder explorer item | double-click / menu Open | file → open in Editor; dir → navigate Explorer |
 | Folder explorer selection | right-click menu / Del | Download (files) · Delete |
 | Editor tab / body menu | Revert | discard dirty buffer; `git restore` to HEAD when in a repo, then reload from disk |
+| File **copy / cut** | `Ctrl/Cmd+C` · `Ctrl/Cmd+X` (tree or Explorer) | menu: Copy / Cut with the same hint; clipboard is in-app only |
+| File **paste** | `Ctrl/Cmd+V` in a folder (tree row or Explorer) | menu: **Paste here** (only when something is on the clipboard); copies as `name copy.ext` when the name is taken |
 | Top bar **RemotePad** | right-click | window menu: Open new window · Copy link to this window · Open the default window |
 | Window | `?w=<id>` | own layout + own Agent host; no `?w=` is the default window |
 | Top bar **RemotePad** | click | version panel (`VersionPop.tsx`): release version, `branch@commit`, repo, tree, origin. There is no gesture manual popover any more. |

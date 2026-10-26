@@ -3,6 +3,7 @@ import type { Favorite, FsEntry, Repo } from '@remotepad/shared';
 import { fileMark } from '../files';
 import { downloadFile } from '../api';
 import { ActionMenu, type MenuItem, type MenuState as BaseMenu } from './ContextMenu';
+import { pasteTargetFor, pasteWouldClash, useFileClipboard } from '../fileClipboard';
 
 type FolderMenu = BaseMenu & { paths?: string[] };
 
@@ -25,6 +26,8 @@ export function FolderView({
   onUnpin,
   onAddRepo,
   onRemoveRepo,
+  onCopyFiles,
+  onPasteFiles,
   onLoad,
 }: {
   dir: string;
@@ -45,11 +48,16 @@ export function FolderView({
   onUnpin: (path: string) => void;
   onAddRepo: (path: string) => void;
   onRemoveRepo: (path: string) => void;
+  /** Put the selection on the file clipboard (copy or cut). */
+  onCopyFiles: (paths: string[], mode: 'copy' | 'cut') => void;
+  /** Paste the file clipboard into this folder (or into a subfolder). */
+  onPasteFiles: (into: string) => void;
   onLoad: (dir: string) => void;
 }) {
   const [picked, setPicked] = useState<string[]>([]);
   const [anchor, setAnchor] = useState<string | null>(null);
   const [menu, setMenu] = useState<FolderMenu | null>(null);
+  const clip = useFileClipboard();
   const [draft, setDraft] = useState<{ kind: 'file' | 'dir' | 'rename'; from?: string } | null>(null);
   const [draftName, setDraftName] = useState('');
   const [confirm, setConfirm] = useState<FsEntry[] | null>(null);
@@ -69,10 +77,26 @@ export function FolderView({
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key !== 'Delete' && e.key !== 'Backspace') return;
       const target = e.target as HTMLElement | null;
       if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) return;
       if (draft || menu || confirm) return;
+
+      // File clipboard: same shortcuts as the tree, and the same menu hints.
+      if (e.ctrlKey || e.metaKey) {
+        const key = e.key.toLowerCase();
+        if ((key === 'c' || key === 'x') && picked.length > 0) {
+          e.preventDefault();
+          onCopyFiles(picked, key === 'c' ? 'copy' : 'cut');
+          return;
+        }
+        if (key === 'v' && clip && !pasteWouldClash(clip.paths, dir)) {
+          e.preventDefault();
+          onPasteFiles(dir);
+          return;
+        }
+      }
+
+      if (e.key !== 'Delete' && e.key !== 'Backspace') return;
       if (picked.length === 0) return;
       e.preventDefault();
       const list = entries || [];
@@ -82,7 +106,7 @@ export function FolderView({
     };
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
-  }, [picked, entries, draft, menu, confirm]);
+  }, [picked, entries, draft, menu, confirm, clip, dir, onCopyFiles, onPasteFiles]);
 
   const items = entries || [];
   const blank: FsEntry = { name: dir, path: dir, kind: 'dir' };
@@ -159,6 +183,10 @@ export function FolderView({
       setDraftName(entry.name);
     } else if (action === 'delete') {
       setConfirm(targets);
+    } else if (action === 'copy' || action === 'cut') {
+      onCopyFiles(targets.map((item) => item.path), action);
+    } else if (action === 'paste') {
+      onPasteFiles(folder);
     } else if (action === 'refresh') {
       onLoad(dir);
     } else if (action === 'term') {
@@ -366,8 +394,14 @@ function ExplorerMenu({
 }) {
   const isDir = menu.entry.kind === 'dir';
   const isBlank = menu.entry.path === menu.entry.name && !menu.paths;
+  const clip = useFileClipboard();
+  const pasteInto = pasteTargetFor(menu.entry.path, isDir);
+  const canPasteHere = Boolean(clip) && !pasteWouldClash(clip!.paths, pasteInto);
   const items: MenuItem[] = multi
     ? [
+      { type: 'item', id: 'copy', label: 'Copy', hint: 'Ctrl/⌘+C' },
+      { type: 'item', id: 'cut', label: 'Cut', hint: 'Ctrl/⌘+X' },
+      ...(canPasteHere ? [{ type: 'item' as const, id: 'paste', label: 'Paste here', hint: 'Ctrl/⌘+V' }] : []),
       { type: 'item', id: 'copy-path', label: 'Copy paths' },
       { type: 'item', id: 'download', label: 'Download' },
       { type: 'sep' },
@@ -385,7 +419,11 @@ function ExplorerMenu({
             { type: 'item' as const, id: 'open-keep', label: 'Open', hint: 'Dbl-click' },
             { type: 'item' as const, id: 'download', label: 'Download' },
           ]),
-      ...(isBlank ? [] : [{ type: 'item' as const, id: 'copy-path', label: 'Copy full path' }, { type: 'sep' as const }]),
+      { type: 'item' as const, id: 'copy', label: 'Copy', hint: 'Ctrl/⌘+C' },
+      { type: 'item' as const, id: 'cut', label: 'Cut', hint: 'Ctrl/⌘+X' },
+      ...(canPasteHere ? [{ type: 'item' as const, id: 'paste', label: 'Paste here', hint: 'Ctrl/⌘+V' }] : []),
+      ...(isBlank ? [] : [{ type: 'sep' as const }, { type: 'item' as const, id: 'copy-path', label: 'Copy full path' }]),
+      { type: 'sep' as const },
       ...(isDir && !isBlank
         ? [
           { type: 'item' as const, id: pinned ? 'unpin' : 'pin', label: pinned ? 'Unpin favorite' : 'Pin favorite' },

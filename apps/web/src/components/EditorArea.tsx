@@ -69,6 +69,8 @@ export function EditorArea({
   onUnpin,
   onAddRepo,
   onRemoveRepo,
+  onCopyFiles,
+  onPasteFiles,
   onLoadDir,
 }: {
   tabs: OpenTab[];
@@ -101,6 +103,8 @@ export function EditorArea({
   onUnpin: (path: string) => void;
   onAddRepo: (path: string) => void;
   onRemoveRepo: (path: string) => void;
+  onCopyFiles: (paths: string[], mode: 'copy' | 'cut') => void;
+  onPasteFiles: (into: string) => void;
   onLoadDir: (dir: string) => void;
 }) {
   const tab = tabs.find((item) => item.path === activePath) || null;
@@ -324,6 +328,8 @@ export function EditorArea({
                 onUnpin={onUnpin}
                 onAddRepo={onAddRepo}
                 onRemoveRepo={onRemoveRepo}
+                onCopyFiles={onCopyFiles}
+                onPasteFiles={onPasteFiles}
                 onLoad={onLoadDir}
               />
             )

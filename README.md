@@ -291,6 +291,7 @@ Click **RemotePad** in the top-left for the version panel: release version, bran
 - `Ctrl/Cmd+L` source / rendered · click the address bar, `Enter` opens the path
 - `Ctrl+`` toggle terminal
 - `Shift+Enter` / `Ctrl/Cmd+Enter` run line or selection in the terminal
+- Copy / cut files: select in the tree or an Explorer, `Ctrl/Cmd+C` or `Ctrl/Cmd+X`, then `Ctrl/Cmd+V` in the target folder (or right-click → **Copy** / **Cut** / **Paste here**). A copy next to the original lands as `name copy.ext`; pasting into another folder keeps the name
 - Click a file to temp-open; right-click the file or tab → **Keep tab open**
 - Click a folder to expand; right-click → **Open in Explorer**
 - Drag paths into Editor / Terminal / Agent

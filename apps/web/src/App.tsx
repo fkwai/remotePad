@@ -11,6 +11,7 @@ import { EditorArea, type OpenTab } from './components/EditorArea';
 import { TerminalPanel } from './components/TerminalPanel';
 import { UpdateButton } from './components/UpdateButton';
 import { windowIdFromUrl, windowQuery, newWindowId, windowUrl } from './window';
+import { clearFileClipboard, fileClipboard, setFileClipboard } from './fileClipboard';
 import { RightDock } from './components/RightDock';
 import { TextClipMenu, ActionMenu } from './components/ContextMenu';
 import { HostPop } from './components/Popovers';
@@ -723,6 +724,40 @@ export function App() {
     void openFolder(to, { from });
   };
 
+  /** Put files on the in-app clipboard (Copy / Cut). */
+  const copyFiles = useCallback((paths: string[], mode: 'copy' | 'cut') => {
+    setFileClipboard({ mode, paths });
+    showToast(`${paths.length === 1 ? basename(paths[0]!) : `${paths.length} items`} ${mode === 'cut' ? 'cut' : 'copied'}`);
+  }, []);
+
+  /**
+   * Paste into a folder. Copy keeps the original and names the copy
+   * `x copy.ext`; cut moves. Both refresh the folders that changed.
+   */
+  const pasteFiles = useCallback(async (into: string) => {
+    const clip = fileClipboard();
+    if (!clip) return;
+    const dir = into.replace(/\/+$/, '') || '/';
+    const touched = new Set<string>([dir]);
+    try {
+      for (const from of clip.paths) {
+        if (clip.mode === 'cut') {
+          const to = `${dir === '/' ? '' : dir}/${basename(from)}`;
+          if (to === from) continue;
+          await api('/api/fs/rename', { method: 'POST', body: JSON.stringify({ from, to }) });
+          touched.add(from.slice(0, from.lastIndexOf('/')) || '/');
+        } else {
+          await api('/api/fs/copy', { method: 'POST', body: JSON.stringify({ from, into: dir }) });
+        }
+      }
+      if (clip.mode === 'cut') clearFileClipboard();
+      showToast(clip.mode === 'cut' ? `Moved to ${basename(dir) || '/'}` : `Copied to ${basename(dir) || '/'}`);
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : String(err));
+    }
+    for (const target of touched) void loadDir(target);
+  }, [loadDir]);
+
   const save = async (path: string) => {
     const tab = tabsRef.current.find((item) => item.path === path);
     if (!tab || tab.binary || tab.kind === 'diff' || tab.kind === 'folder') return;
@@ -1421,6 +1456,8 @@ export function App() {
               onRunStartup={runStartup}
               onReorderFavorites={(paths) => void reorderFavorites(paths)}
               onReorderRepos={(paths) => void reorderRepos(paths)}
+              onCopyFiles={copyFiles}
+              onPasteFiles={(into) => void pasteFiles(into)}
               pendingPaths={pendingPaths}
             />
           </Panel>
@@ -1482,6 +1519,8 @@ export function App() {
                   onUnpin={(path) => void unpinFolder(path)}
                   onAddRepo={(path) => void addRepo(path)}
                   onRemoveRepo={(path) => void removeRepo(path)}
+                  onCopyFiles={copyFiles}
+                  onPasteFiles={(into) => void pasteFiles(into)}
                   onLoadDir={loadDir}
                 />
               </Panel>
