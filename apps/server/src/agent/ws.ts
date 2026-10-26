@@ -2,7 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import { appendFileSync } from 'node:fs';
 import type { AgentClientMessage, AgentServerMessage } from '@remotepad/shared';
 import { resolveSafe } from '../paths.ts';
-import { agentHost } from './host.ts';
+import { agentHostFor } from './host.ts';
 
 // TEMP diagnostic: prove whether browser clicks reach the server.
 const WS_LOG = process.env.REMOTEPAD_WS_LOG || '/tmp/remotepad-ws.log';
@@ -17,7 +17,9 @@ function send(socket: { send: (data: string) => void }, msg: AgentServerMessage)
 }
 
 export async function registerAgentSocket(app: FastifyInstance) {
-  app.get('/ws/agent', { websocket: true }, (socket) => {
+  // `?w=` selects the window's own host: two tabs, two Agent conversations.
+  app.get<{ Querystring: { w?: string } }>('/ws/agent', { websocket: true }, (socket, req) => {
+    const agentHost = agentHostFor(req.query?.w);
     const unsub = agentHost.subscribe((msg) => send(socket, msg));
     wsLog('open');
 

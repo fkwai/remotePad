@@ -121,6 +121,17 @@ worktrees can run their own suite at the same time.
 
 
 
+## Multiple windows
+
+One install can drive several workspaces at once: right-click the **RemotePad**
+wordmark → **Open new window**. Each window gets a `?w=<id>` and keeps its own
+layout (tabs, tree root, terminal) and its own Agent conversation, so window A can
+sit in one repo while window B is in another. They share what should be shared —
+favorites, repos, settings — and `Copy link to this window` reproduces a window,
+not just the app.
+
+A plain link (no `?w=`) is the default window and behaves exactly as before.
+
 ## Development protocol
 
 The install you are working in is live. Nothing below restarts it, writes to it,
@@ -272,6 +283,7 @@ Click **RemotePad** in the top-left for the version panel: release version, bran
 - Drag paths into Editor / Terminal / Agent
 - Favorites & repos: right-click for explorer, startup, terminal, remove; drag to reorder
 - Click the computer name for host / git / terminals
+- **Right-click RemotePad** (top-left): open a new window, copy this window's link, or open the default window
 - Agent compose — drag a file in, or paste a selection copied from the editor or a terminal: the draft shows a colored inline chip (filename, folder or `terminal`), the agent receives the absolute path plus the copied code, and the transcript collapses it back to a chip
 - Agent replies are rendered as GitHub-flavoured markdown (tables, lists, code, math)
 - Top bar **Update N** — `origin/main` has N commits this install does not; one click fast-forwards and reloads (it refuses a dirty tree or local commits, and rebuilds the web bundle when UI code moved). With nothing to pull the same spot shows `branch@hash`, and clicking it copies the full hash

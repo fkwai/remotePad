@@ -20,6 +20,25 @@ const EMPTY: SessionState = {
   rightTab: 'agent',
 };
 
+/**
+ * Which window (browser tab) this state belongs to.
+ *
+ * Two windows are two workspaces: one can sit in repo A while the other sits in
+ * repo B. The id rides along as `?w=`; anything unrecognised is the default
+ * window, so an old link keeps working.
+ */
+export function windowId(raw: unknown): string {
+  const value = typeof raw === 'string' ? raw.trim() : '';
+  return /^[A-Za-z0-9_-]{1,32}$/.test(value) ? value : 'default';
+}
+
+/** Path for a window's restore state; the default window keeps the old file. */
+export function sessionPathFor(id: string): string {
+  const win = windowId(id);
+  if (win === 'default') return SESSION_PATH;
+  return SESSION_PATH.replace(/\.json$/, `.${win}.json`);
+}
+
 function asState(raw: unknown): SessionState {
   if (!raw || typeof raw !== 'object') return { ...EMPTY };
   const item = raw as Record<string, unknown>;
@@ -61,9 +80,10 @@ function asState(raw: unknown): SessionState {
   };
 }
 
-export async function readSession(): Promise<SessionState> {
+export async function readSession(id?: string): Promise<SessionState> {
+  const file = sessionPathFor(windowId(id));
   try {
-    return asState(JSON.parse(await fs.readFile(SESSION_PATH, 'utf8')));
+    return asState(JSON.parse(await fs.readFile(file, 'utf8')));
   } catch {
     return { ...EMPTY };
   }
@@ -74,14 +94,15 @@ export async function readSession(): Promise<SessionState> {
  *  surfaced as a 500 on /api/session and lost the layout state. */
 let sessionWrite: Promise<unknown> = Promise.resolve();
 
-export async function writeSession(input: SessionState): Promise<SessionState> {
+export async function writeSession(input: SessionState, id?: string): Promise<SessionState> {
   const state = asState(input);
+  const file = sessionPathFor(windowId(id));
   const run = sessionWrite.then(async () => {
-    await fs.mkdir(path.dirname(SESSION_PATH), { recursive: true });
+    await fs.mkdir(path.dirname(file), { recursive: true });
     // A per-write temp name keeps this safe even across processes.
-    const tmp = `${SESSION_PATH}.${process.pid}.${Date.now()}.tmp`;
+    const tmp = `${file}.${process.pid}.${Date.now()}.tmp`;
     await fs.writeFile(tmp, JSON.stringify(state, null, 2));
-    await fs.rename(tmp, SESSION_PATH);
+    await fs.rename(tmp, file);
     return state;
   });
   sessionWrite = run.catch(() => undefined);

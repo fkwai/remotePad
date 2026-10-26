@@ -6,6 +6,7 @@ import { execFileSync } from 'node:child_process';
 import type { AgentBackend, AgentChange, AgentHistoryItem, AgentServerMessage, AgentSessionInfo, AgentStatus } from '@remotepad/shared';
 import { isHelperSessionId } from '@remotepad/shared';
 import { config } from '../config.ts';
+import { windowId } from '../session.ts';
 import { applyLlmSettingsToEnv } from '../llm-settings.ts';
 import {
   createCatsCoProject as createProjectApi,
@@ -2293,4 +2294,31 @@ export class AgentHost {
   }
 }
 
-export const agentHost = new AgentHost();
+/**
+ * One host per browser window.
+ *
+ * The Agent panel keeps a session, a backend and a cloud topic; sharing one host
+ * meant two windows fought over all three. Hosts are created on first use — a
+ * window that never opens the panel costs nothing — and the id comes from `?w=`
+ * (see session.ts:windowId) so it matches the window's layout state.
+ */
+const hosts = new Map<string, AgentHost>();
+
+export function agentHostFor(id?: string): AgentHost {
+  const key = windowId(id);
+  let host = hosts.get(key);
+  if (!host) {
+    // A tab-heavy user must not turn this into a Dashboard poll storm: beyond a
+    // handful of windows the oldest is reused.
+    if (hosts.size >= 8) {
+      const oldest = hosts.keys().next().value;
+      if (oldest) hosts.delete(oldest);
+    }
+    host = new AgentHost();
+    hosts.set(key, host);
+  }
+  return host;
+}
+
+/** Kept for callers that do not know about windows (diagnostics, tests). */
+export const agentHost = agentHostFor('default');

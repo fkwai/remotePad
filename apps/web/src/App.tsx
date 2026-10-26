@@ -10,8 +10,9 @@ import { LeftSidebar, type SideTab } from './components/LeftSidebar';
 import { EditorArea, type OpenTab } from './components/EditorArea';
 import { TerminalPanel } from './components/TerminalPanel';
 import { UpdateButton } from './components/UpdateButton';
+import { windowIdFromUrl, windowQuery, newWindowId, windowUrl } from './window';
 import { RightDock } from './components/RightDock';
-import { TextClipMenu } from './components/ContextMenu';
+import { TextClipMenu, ActionMenu } from './components/ContextMenu';
 import { HostPop } from './components/Popovers';
 import { VersionPop } from './components/VersionPop';
 import type { AgentChatMessage } from './components/AgentPanel';
@@ -40,6 +41,10 @@ export function App() {
   const [repoPath, setRepoPath] = useState<string | null>(null);
   const [sideTab, setSideTab] = useState<SideTab>('favorites');
   const [versionOpen, setVersionOpen] = useState(false);
+  const [brandMenu, setBrandMenu] = useState<{ x: number; y: number } | null>(null);
+  /** This tab's window id (`?w=`); 'default' for an ordinary link. */
+  const win = useRef(windowIdFromUrl()).current;
+  const winQuery = windowQuery(win);
   const [hostOpen, setHostOpen] = useState(false);
   const [moduleEnabled, setModuleEnabled] = useState<Record<ViewerModuleId, boolean>>(defaultViewerEnabled);
   const moduleEnabledRef = useRef(moduleEnabled);
@@ -156,7 +161,7 @@ export function App() {
         const [favs, listed, session, modules] = await Promise.all([
           api<{ folders: Favorite[] }>('/api/favorites').catch(() => ({ folders: [] as Favorite[] })),
           api<ReposResponse>('/api/repos').catch(() => ({ repos: [] as Repo[], controlPath: '' })),
-          api<SessionState>('/api/session').catch(() => null),
+          api<SessionState>(`/api/session${winQuery}`).catch(() => null),
           api<ModulesResponse>('/api/modules').catch(() => null),
         ]);
         if (cancelled) return;
@@ -239,7 +244,7 @@ export function App() {
       rightTab: 'agent' as const,
     } satisfies SessionState);
     if (keepalive) {
-      void fetch('/api/session', {
+      void fetch(`/api/session${winQuery}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body,
@@ -247,7 +252,7 @@ export function App() {
       }).catch(() => undefined);
       return;
     }
-    void api('/api/session', { method: 'PUT', body }).catch(() => undefined);
+    void api(`/api/session${winQuery}`, { method: 'PUT', body }).catch(() => undefined);
   };
 
   useEffect(() => {
@@ -394,7 +399,7 @@ export function App() {
     let closed = false;
     let retry: number | undefined;
     const connect = () => {
-      const ws = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws/agent`);
+      const ws = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws/agent${winQuery}`);
       agentWs.current = ws;
       ws.onopen = () => {
         const cwd = repoPathRef.current || treeRootRef.current;
@@ -1293,7 +1298,18 @@ export function App() {
   return (
     <div className="app">
       <header className="topbar">
-        <button type="button" className="brand" onClick={() => { setVersionOpen((v) => !v); setHostOpen(false); }}>
+        <button
+          type="button"
+          className="brand"
+          onClick={() => { setVersionOpen((v) => !v); setHostOpen(false); setBrandMenu(null); }}
+          onContextMenu={(e) => {
+            e.preventDefault();
+            setVersionOpen(false);
+            setHostOpen(false);
+            setBrandMenu({ x: e.clientX, y: e.clientY });
+          }}
+          title="Click: version · Right-click: windows"
+        >
           <span className="brand-mark" /> RemotePad
         </button>
         <UpdateButton onToast={showToast} />
@@ -1595,6 +1611,34 @@ export function App() {
           )}
         </PanelGroup>
       </div>
+      {brandMenu && (
+        <ActionMenu
+          x={brandMenu.x}
+          y={brandMenu.y}
+          items={[
+            { type: 'item', id: 'new-window', label: 'Open new window', hint: 'another repo' },
+            { type: 'item', id: 'copy-window', label: 'Copy link to this window' },
+            { type: 'item', id: 'default-window', label: 'Open the default window' },
+          ]}
+          onAction={(id) => {
+            setBrandMenu(null);
+            if (id === 'new-window') {
+              window.open(windowUrl(newWindowId()), '_blank', 'noopener');
+              return;
+            }
+            if (id === 'default-window') {
+              window.open(windowUrl('default'), '_blank', 'noopener');
+              return;
+            }
+            if (id === 'copy-window') {
+              const url = windowUrl(win);
+              void navigator.clipboard?.writeText(url).catch(() => undefined);
+              showToast(`Copied ${url}`);
+            }
+          }}
+          onClose={() => setBrandMenu(null)}
+        />
+      )}
       {versionOpen && (
         <>
           <div className="float-mask" onClick={() => setVersionOpen(false)} />

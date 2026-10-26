@@ -1,7 +1,8 @@
 import type { FastifyInstance } from 'fastify';
-import { agentHost } from '../agent/host.ts';
+import { agentHostFor } from '../agent/host.ts';
 
 /** Internal state behind the Agent panel's Send/Stop button. */
 export async function registerAgentStateRoutes(app: FastifyInstance) {
-  app.get('/api/agent/state', async () => agentHost.diagnostics());
+  app.get<{ Querystring: { w?: string } }>('/api/agent/state', async (req) =>
+    agentHostFor(req.query.w).diagnostics());
 }
