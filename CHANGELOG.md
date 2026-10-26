@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.0.2 — 2026-10-26
+
+- Copy / cut / paste files in the Sidebar tree and the Folder Explorer, by menu or
+  `Ctrl/Cmd+C/X/V`; pasting next to the original names it `x copy.ext`
+- Multiple windows: right-click the wordmark to open another workspace; each tab
+  keeps its own layout and its own Agent conversation (`?w=`)
+- Lanes: stable (main), dev and nightly, switchable from the version panel
+- Agent: drafts and file reviews stay in their conversation; a review diff can be
+  edited; the CatsCo Stop button clears when the turn ends, including rounds that
+  end on a step
+- Fresh profile works: a missing file answers 404 instead of a stack trace, and the
+  repos control file is created on first run
+- `scripts/nightly.sh` publishes a tested nightly once a day
+
 ## 0.0.1 — 2026-10-26
 
 First tagged release.
