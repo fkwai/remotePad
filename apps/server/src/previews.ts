@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import net from 'node:net';
 import path from 'node:path';
@@ -9,7 +10,23 @@ import type { PreviewInfo } from '@remotepad/shared';
  * They live in `<repo>/.previews/<name>/` next to a `ui`/`api` port file, so the
  * running instance can report them without talking to the previews themselves.
  */
+/**
+ * Where preview.sh keeps its state: always the *main* checkout.
+ *
+ * A preview runs from a worktree, but preview.sh writes `.previews/` next to the
+ * checkout the user ran it from. Inside a worktree, `repo` is that worktree, so
+ * resolve the shared git dir and use its parent.
+ */
 export function previewsDir(repo: string): string {
+  try {
+    const common = execFileSync(
+      'git', ['-C', repo, 'rev-parse', '--path-format=absolute', '--git-common-dir'],
+      { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] },
+    ).trim();
+    if (common) return path.join(path.dirname(common), '.previews');
+  } catch {
+    // Not a git checkout (or git missing): fall back to the repo itself.
+  }
   return path.join(repo, '.previews');
 }
 

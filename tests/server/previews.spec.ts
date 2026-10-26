@@ -1,9 +1,10 @@
+import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { expect, test } from '@playwright/test';
-import { listPreviews } from '../../apps/server/src/previews.ts';
+import { listPreviews, previewsDir } from '../../apps/server/src/previews.ts';
 
 /** `GET /api/previews` reads what preview.sh left on disk. */
 
@@ -13,6 +14,30 @@ function writePreview(repo: string, name: string, ui: number, api?: number) {
   fs.writeFileSync(path.join(dir, 'ui'), `${ui}\n`);
   if (api) fs.writeFileSync(path.join(dir, 'api'), `${api}\n`);
 }
+
+test.describe('previews dir', () => {
+  test('a worktree resolves to the main checkout, where preview.sh writes', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'rp-wt-'));
+    const git = (...args: string[]) => execFileSync('git', ['-C', dir, ...args], {
+      encoding: 'utf8',
+      env: {
+        ...process.env,
+        GIT_AUTHOR_NAME: 'e2e', GIT_AUTHOR_EMAIL: 'e2e@example.com',
+        GIT_COMMITTER_NAME: 'e2e', GIT_COMMITTER_EMAIL: 'e2e@example.com',
+      },
+    }).trim();
+
+    git('init', '-q', '-b', 'main');
+    fs.writeFileSync(path.join(dir, 'README.md'), 'x\n');
+    git('add', '-A');
+    git('commit', '-qm', 'init');
+    const wt = path.join(dir, 'wt');
+    git('worktree', 'add', '-q', wt, '-b', 'helper/demo');
+
+    expect(previewsDir(dir)).toBe(path.join(dir, '.previews'));
+    expect(previewsDir(wt)).toBe(path.join(dir, '.previews'));
+  });
+});
 
 function listen(): Promise<{ port: number; close: () => void }> {
   return new Promise((resolve) => {
