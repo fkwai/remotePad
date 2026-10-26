@@ -64,17 +64,3 @@ export interface ChannelStatus {
   current: boolean;
 }
 
-/** Result of POST /api/channels (switching lane). */
-export interface ChannelResult {
-  ok: boolean;
-  switched: boolean;
-  channel?: string;
-  head?: string;
-  needsInstall?: boolean;
-  needsBuild?: boolean;
-  needsRestart?: boolean;
-  built?: boolean;
-  buildError?: string;
-  message: string;
-  status?: UpdateStatus;
-}

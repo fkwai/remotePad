@@ -132,31 +132,41 @@ not just the app.
 
 A plain link (no `?w=`) is the default window and behaves exactly as before.
 
-## Three lanes
+## Three lanes, three instances
 
-One integration lane, one daily build, one release. You never need git to move
-between them: open the **RemotePad** wordmark and press **Switch** on a lane.
+Every lane runs **beside** the others, on its own port, so you can compare two
+versions in two browser tabs. Nothing is ever switched in place: a port belongs to
+a process, and a process runs from a working tree — one checkout holds one branch.
 
-| Lane | Branch | For | How it reaches you |
+| Lane | Branch | Port | How it starts |
 | --- | --- | --- | --- |
-| **stable** | `main` | what you run day to day | **Update N** when `origin/main` moves |
-| **dev** | `dev` | small fixes and polish, merge freely | folded into the nightly build |
-| **nightly** | `nightly` | the tested daily build | `scripts/nightly.sh` at 03:00, or **Switch → nightly** |
+| **stable** | `main` | 3847 | the install you already run |
+| **dev** | `dev` | 6210-ish | `scripts/lanes.sh start dev` |
+| **nightly** | `nightly` | 6120-ish | `scripts/lanes.sh start nightly` |
+
+`scripts/lanes.sh start` (both), `sync` (pull + restart), `status`, `stop <name>`.
+Each lane gets its own worktree, its own data directory and its own ports; your
+settings are shared so favourites and repos look the same everywhere.
+
+Open the **RemotePad** wordmark: each lane row shows its commit and either the
+port it is running on (**Open**) or the command to start it (**Start**). One
+tunnel per port you want to reach:
+
+```bash
+ssh -N -L 6120:127.0.0.1:6120 <host>   # nightly
+ssh -N -L 6210:127.0.0.1:6210 <host>   # dev
+```
 
 Rules that keep this honest:
 
-- Small change → commit on `dev`, no worktree, no PR. It ships with tonight's build.
-- Risky or large change → its own worktree (`scripts/preview.sh <feature> origin/helper/<feature>`), test it, then merge into `dev`.
-- `scripts/nightly.sh` runs in its own worktree: it merges `main` + `dev` + every
-  `origin/helper/*` branch that merges cleanly, stamps `X.Y.Z-nightly.DATE`,
-  installs, builds and runs the whole suite. **Only a green run pushes.** A
-  conflicting feature branch is skipped and named, never silently dropped.
-- When a nightly has been good for a while, promote it: fast-forward `main` to
-  `nightly`, bump the version, tag, and delete the merged feature branches and
-  their worktrees. `dev` and `nightly` are then realigned on the new `main`.
-
-The version panel shows the lane, the branch and the ref it tracks, every lane's
-distance from here, and any previews running on the box.
+- Small change → commit on `dev`; it appears in the nightly build and in the dev
+  instance after `scripts/lanes.sh sync dev`.
+- Risky or large change → its own worktree (`scripts/preview.sh <feature> origin/helper/<feature>`), then merge into `dev`.
+- `scripts/nightly.sh` runs in its own worktree at 03:00: merges `main` + `dev` +
+  every `origin/helper/*` that merges cleanly, stamps `X.Y.Z-nightly.DATE`,
+  installs, builds and runs the whole suite. **Only a green run pushes.**
+- Promote when a nightly has been good: fast-forward `main` to `nightly`, bump the
+  version, tag, delete merged branches and their worktrees, realign `dev`/`nightly`.
 
 ## Development protocol
 

@@ -163,12 +163,13 @@ Work on a branch in this checkout when the user asks to persist. Branch naming f
 
 ## Lanes
 
-- **stable** — `main`. Release channel; runtimes update with **Update N**.
-- **dev** — small fixes land here directly (`commit → push origin dev`). No worktree, no PR.
-- **nightly** — `scripts/nightly.sh` (systemd timer `remotepad-nightly.timer`, 03:00) merges `main` + `dev` + clean `origin/helper/*`, stamps `X.Y.Z-nightly.DATE`, builds, runs the full suite, and pushes only when green.
+- **stable** — `main`, the install on 3847. Release channel; **Update N** pulls it.
+- **dev** — small fixes land here directly (`commit → push origin dev`), no worktree, no PR.
+- **nightly** — `scripts/nightly.sh` (timer 03:00) merges `main` + `dev` + clean `origin/helper/*`, stamps `X.Y.Z-nightly.DATE`, builds, runs the suite, pushes only when green.
 - **feature** — a worktree for risky work: `./scripts/preview.sh <feature> origin/helper/<feature>`, then merge into `dev`.
-- Promotion: `git switch main && git merge --ff-only origin/nightly`, bump the version, tag, then delete merged branches/worktrees and realign `dev`/`nightly` on `main`.
-- Switching lane in the UI: `POST /api/channels {channel}` — clean tree required, fast-forward only, rebuilds the web dist, reports install/restart needs.
+- **Running lanes side by side** — `scripts/lanes.sh start|sync|status|stop`. A port belongs to a process in a working tree, so each lane is a worktree instance; never switch the user's checkout between branches.
+- **Version panel** — lane rows show commit + port: **Open** when that lane's instance is running, **Start** (copies the command) when it is not. There is no in-place lane switch.
+- Promotion: `git switch main && git merge --ff-only origin/nightly`, bump the version, tag, delete merged branches/worktrees, realign `dev`/`nightly`.
 
 ## Development (agents)
 

@@ -1,13 +1,16 @@
 import { useCallback, useEffect, useState } from 'react';
-import type { ChannelResult, ChannelStatus, PreviewInfo, UpdateStatus } from '@remotepad/shared';
+import type { ChannelStatus, PreviewInfo, UpdateStatus } from '@remotepad/shared';
 import { api } from '../api';
 
 /**
  * Build / version panel behind the RemotePad wordmark.
  *
  * Shows what this install is running (version, lane, commit), where it lives,
- * whether the lane is ahead, and which other lanes exist — with a switch button,
- * so moving between stable, dev and nightly never needs a git command.
+ * whether the lane is ahead, and which other lanes are running on their own port.
+ *
+ * Lanes are never switched in place: a branch has no port of its own, so each
+ * lane runs from its own worktree on its own port (scripts/lanes.sh). The panel
+ * opens that port instead of rewriting this checkout.
  */
 export function VersionPop({ onClose }: { onClose: () => void }) {
   const [status, setStatus] = useState<UpdateStatus | null>(null);
@@ -16,7 +19,6 @@ export function VersionPop({ onClose }: { onClose: () => void }) {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<string | null>(null);
-  const [switching, setSwitching] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setBusy(true);
@@ -44,30 +46,15 @@ export function VersionPop({ onClose }: { onClose: () => void }) {
   // older runtime still shows something meaningful.
   const lane = status?.channel ?? status?.branch ?? 'detached';
 
-  const switchTo = async (channel: string) => {
-    setSwitching(channel);
-    setNote(null);
-    try {
-      const result = await api<ChannelResult>('/api/channels', {
-        method: 'POST',
-        body: JSON.stringify({ channel }),
-      });
-      setNote(result.message);
-      if (result.ok && result.switched) {
-        // Server code does not hot-swap: reload only when nothing needs a restart.
-        if (!result.needsRestart && !result.needsInstall) {
-          window.setTimeout(() => window.location.reload(), 600);
-          return;
-        }
-        await load();
-        return;
-      }
-      await load();
-    } catch (err) {
-      setNote(err instanceof Error ? err.message : String(err));
-    } finally {
-      setSwitching(null);
-    }
+  /** A lane runs as a preview named after it; that is how it gets a port. */
+  const instanceFor = (laneName: string) => previews.find((item) => item.name === laneName);
+
+  const openLane = (port: number) => {
+    const url = `http://${location.hostname}:${port}/`;
+    const written = navigator.clipboard?.writeText(url);
+    written?.catch(() => undefined);
+    window.open(url, '_blank', 'noopener');
+    setNote(`Opened ${url} — if it does not answer, forward the port: ssh -N -L ${port}:127.0.0.1:${port} <host>`);
   };
 
   return (
@@ -114,31 +101,49 @@ export function VersionPop({ onClose }: { onClose: () => void }) {
         {channels.length > 0 && (
           <div className="version-channels">
             <div className="version-previews-head"><span>Channels</span></div>
-            {channels.map((channel) => (
-              <div
-                className={`version-channel ${channel.current ? 'current' : ''}`}
-                key={channel.name}
-              >
-                <span className="version-channel-name">{channel.name}</span>
-                <span className="version-channel-meta">
-                  {channel.head ? channel.head.slice(0, 7) : 'missing'}
-                  {channel.current
-                    ? ' · here'
-                    : channel.behind > 0 ? ` · ${channel.behind} behind` : ' · same'}
-                </span>
-                {!channel.current && channel.head && (
-                  <button
-                    type="button"
-                    className="ghost version-channel-go"
-                    disabled={Boolean(switching) || Boolean(status?.dirty)}
-                    title={status?.dirty ? 'Commit or discard local changes first' : `Switch to ${channel.name}`}
-                    onClick={() => void switchTo(channel.name)}
-                  >
-                    {switching === channel.name ? '…' : 'Switch'}
-                  </button>
-                )}
-              </div>
-            ))}
+            {channels.map((channel) => {
+              const instance = instanceFor(channel.name);
+              const live = Boolean(instance?.alive);
+              return (
+                <div
+                  className={`version-channel ${channel.current ? 'current' : ''}`}
+                  key={channel.name}
+                >
+                  <span className="version-channel-name">{channel.name}</span>
+                  <span className="version-channel-meta">
+                    {channel.head ? channel.head.slice(0, 7) : 'missing'}
+                    {channel.current
+                      ? ' · here'
+                      : live ? ` · :${instance!.uiPort}` : ' · not running'}
+                    {!channel.current && channel.behind > 0 ? ` · ${channel.behind} behind` : ''}
+                  </span>
+                  {!channel.current && live && (
+                    <button
+                      type="button"
+                      className="ghost version-channel-go"
+                      title={`Open ${channel.name} on port ${instance!.uiPort} in a new tab`}
+                      onClick={() => openLane(instance!.uiPort)}
+                    >
+                      Open
+                    </button>
+                  )}
+                  {!channel.current && !live && (
+                    <button
+                      type="button"
+                      className="ghost version-channel-go"
+                      title={`ssh -N -L ?:? — run scripts/lanes.sh start ${channel.name} first`}
+                      onClick={() => {
+                        const cmd = `./scripts/lanes.sh start ${channel.name}`;
+                        navigator.clipboard?.writeText(cmd).catch(() => undefined);
+                        setNote(`Start it with: ${cmd}`);
+                      }}
+                    >
+                      Start
+                    </button>
+                  )}
+                </div>
+              );
+            })}
           </div>
         )}
 

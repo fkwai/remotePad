@@ -2,9 +2,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import fs from 'node:fs';
 import path from 'node:path';
-import type {
-  ChannelResult, ChannelStatus, UpdateResult, UpdateStatus,
-} from '@remotepad/shared';
+import type { ChannelStatus, UpdateResult, UpdateStatus } from '@remotepad/shared';
 
 const run = promisify(execFile);
 
@@ -283,86 +281,6 @@ export async function listChannels(repo: string): Promise<ChannelStatus[]> {
     });
   }
   return out;
-}
-
-/**
- * Move this checkout onto a channel.
- *
- * Refuses a dirty tree (an update must never discard work), keeps the old branch
- * head, and reports what the new code needs: a dependency install, a web rebuild
- * (done here) and a server restart.
- */
-export async function switchChannel(repo: string, name: string): Promise<ChannelResult> {
-  const target = CHANNELS.find((channel) => channel.name === name);
-  if (!target) return { ok: false, switched: false, message: `Unknown channel: ${name}` };
-
-  const dirty = await git(repo, ['status', '--porcelain', '--untracked-files=no'])
-    .then((out) => out !== '')
-    .catch(() => true);
-  if (dirty) {
-    return { ok: false, switched: false, message: 'Working tree has local changes — commit or discard them first.' };
-  }
-
-  await git(repo, ['fetch', '--quiet', 'origin', target.branch], 40_000).catch(() => undefined);
-  const remoteRef = `refs/remotes/origin/${target.branch}`;
-  const remoteHead = await git(repo, ['rev-parse', '--verify', '--quiet', remoteRef]).catch(() => '');
-  if (!remoteHead) {
-    return { ok: false, switched: false, message: `origin/${target.branch} does not exist — nothing to switch to.` };
-  }
-
-  const before = await git(repo, ['rev-parse', 'HEAD']).catch(() => '');
-
-  try {
-    // A local branch of the same name is reused (it may hold local commits); the
-    // merge below refuses if it cannot fast-forward.
-    const hasLocal = await git(repo, ['rev-parse', '--verify', '--quiet', `refs/heads/${target.branch}`])
-      .then(() => true)
-      .catch(() => false);
-    if (hasLocal) {
-      await git(repo, ['checkout', '--quiet', target.branch], 40_000);
-    } else {
-      await git(repo, ['checkout', '--quiet', '-b', target.branch, '--track', `origin/${target.branch}`], 40_000);
-    }
-    await git(repo, ['merge', '--ff-only', '--quiet', `origin/${target.branch}`], 60_000);
-  } catch (err) {
-    // Put the checkout back where it was: a failed switch must not strand it.
-    if (before) await git(repo, ['checkout', '--quiet', before], 40_000).catch(() => undefined);
-    return { ok: false, switched: false, message: errorText(err) };
-  }
-
-  const after = await git(repo, ['rev-parse', 'HEAD']).catch(() => '');
-  const changed = await git(repo, ['diff', '--name-only', `${before}..${after}`]).catch(() => '');
-  const impact = classifyChanges(changed.split('\n'));
-
-  let built = false;
-  let buildError: string | undefined;
-  if (impact.needsBuild) {
-    try {
-      await rebuildWeb(repo);
-      built = true;
-    } catch (err) {
-      buildError = errorText(err);
-    }
-  }
-
-  const notes: string[] = [];
-  if (impact.needsInstall) notes.push('install dependencies');
-  if (impact.needsRestart) notes.push('restart RemotePad for server changes');
-  if (impact.needsBuild && !built) notes.push('rebuild the web app');
-
-  return {
-    ok: true,
-    switched: before !== after,
-    channel: target.name,
-    head: after,
-    needsInstall: impact.needsInstall,
-    needsBuild: impact.needsBuild,
-    needsRestart: impact.needsRestart,
-    built,
-    buildError,
-    message: notes.length ? `Now on ${target.name} — ${notes.join(', ')}.` : `Now on ${target.name}.`,
-    status: await readUpdateStatus(repo, { fetch: false }),
-  };
 }
 
 function errorText(err: unknown): string {

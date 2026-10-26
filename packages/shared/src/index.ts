@@ -384,5 +384,5 @@ export {
 
 export {
   type UpdateStatus, type UpdateResult, type PreviewInfo,
-  type ChannelStatus, type ChannelResult,
+  type ChannelStatus,
 } from './update.ts';
