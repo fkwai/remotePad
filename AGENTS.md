@@ -134,6 +134,8 @@ If a job is about click / double-click / reveal / scroll, read this table first.
 | Top bar **RemotePad** | right-click | window menu: Open new window · Copy link to this window · Open the default window |
 | Window | `?w=<id>` | own layout + own Agent host; no `?w=` is the default window |
 | Top bar **RemotePad** | click | version panel (`VersionPop.tsx`): version, lane, `branch → upstream`, tree state, lane switcher, previews. No gesture manual. |
+| Agent **change** | per block | Keep / Ignore one hunk (`ReviewBlocks.tsx`); Ignore rebuilds the file with that block reverted (`revertBlock`, shared) |
+| Agent **review record** | automatic | `ReviewLog` per session key: kept/ignored/edited events; the next `send()` in that session prepends it once. Inspect with `GET /api/agent/review?w=` |
 | Agent **compose** | drop a file / paste an editor or terminal selection | insert a colored inline chip (`AgentComposer.tsx`, contenteditable); on send it expands to `[file]`/`[dir]`/`[term]` + absolute path (plus a fenced body for copies). No chip row above the input. |
 | Agent **transcript** | assistant text | rendered as GitHub-flavoured markdown (`agent-md`); user text keeps `[file]` refs as chips with collapsed code |
 | Agent **tab** | right-click | Open session JSONL · Rename · Close |

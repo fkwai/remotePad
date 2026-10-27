@@ -125,6 +125,8 @@ export function App() {
   /** Current round (one send → one answer); tool rows carry it so the step count
    *  restarts at 1 per round instead of climbing across rounds. */
   const agentRound = useRef(0);
+  /** Files whose "user edited" note has already gone to the server this round. */
+  const reviewEditedSent = useRef<Set<string>>(new Set());
   /** Status as of the last message, updated synchronously: two status messages in
    *  one frame must still count as two transitions (idle → running). */
   const agentStatusRef = useRef<string>('idle');
@@ -1074,6 +1076,9 @@ export function App() {
             before: change.before,
             after: change.after,
             agentPath: filePath,
+            hunks: change.hunks,
+            keptHunks: change.keptHunks,
+            userEdited: change.userEdited,
           }
           : item);
       }
@@ -1091,6 +1096,9 @@ export function App() {
         before: change.before,
         after: change.after,
         agentPath: filePath,
+        hunks: change.hunks,
+        keptHunks: change.keptHunks,
+        userEdited: change.userEdited,
       };
       return [tab, ...rest];
     });
@@ -1136,6 +1144,9 @@ export function App() {
           before: change.before,
           after: change.after,
           agentPath: tab.path,
+          hunks: change.hunks,
+          keptHunks: change.keptHunks,
+          userEdited: change.userEdited,
         };
       }));
     }
@@ -1163,6 +1174,9 @@ export function App() {
           diff: change.diff,
           before: change.before,
           after: change.after,
+          hunks: change.hunks,
+          keptHunks: change.keptHunks,
+          userEdited: change.userEdited,
         };
       })
       .filter((tab): tab is OpenTab => Boolean(tab)));
@@ -1508,6 +1522,13 @@ export function App() {
                     });
                   }}
                   onChange={(path, content) => {
+                    const reviewTab = tabsRef.current.find((tab) => tab.path === path && tab.agentPath);
+                    if (reviewTab && !reviewEditedSent.current.has(path)) {
+                      // Told once per file: the record says "you edited it", and
+                      // repeating it every keystroke would bury the real signal.
+                      reviewEditedSent.current.add(path);
+                      sendAgent({ type: 'review_edited', path });
+                    }
                     setTabs((prev) => prev.map((tab) => tab.path === path ? {
                       ...tab,
                       content,
@@ -1549,6 +1570,11 @@ export function App() {
                   onCopyFiles={copyFiles}
                   onPasteFiles={(into) => void pasteFiles(into)}
                   onLoadDir={loadDir}
+                  onHunkDecision={(path, id, decision) => sendAgent({ type: 'hunk', path, id, decision })}
+                  onOpenPath={(path) => {
+                    const tab = tabsRef.current.find((item) => item.path === path);
+                    if (tab) setTabs((prev) => prev.map((item) => item.path === path ? { ...item, agentPath: undefined } : item));
+                  }}
                 />
               </Panel>
               {termOpen && (

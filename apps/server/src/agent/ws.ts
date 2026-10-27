@@ -71,6 +71,10 @@ export async function registerAgentSocket(app: FastifyInstance) {
             agentHost.addRepo(msg.path);
           } else if (msg.type === 'repos_dismiss') {
             agentHost.dismissRepo(msg.path);
+          } else if (msg.type === 'hunk') {
+            await agentHost.decideHunk(msg.path, msg.id, msg.decision);
+          } else if (msg.type === 'review_edited') {
+            agentHost.noteReviewEdited(msg.path);
           } else if (msg.type === 'accept') {
             await agentHost.accept(msg.path);
           } else if (msg.type === 'undo') {

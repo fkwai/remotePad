@@ -6,6 +6,8 @@ import type { ViewerKind } from '../files';
 import { hasRenderedView, monacoLanguage, basename } from '../files';
 import { readEntryDrag, setEntryDrag } from '../dnd';
 import { decideSync } from '../editorSync';
+import { ReviewBlocks } from './ReviewBlocks';
+import type { DiffHunk } from '@remotepad/shared';
 import { ActionMenu, type MenuItem } from './ContextMenu';
 import { MarkdownView } from './viewers/MarkdownView';
 import { JsonView, parseJsonSafe } from './viewers/JsonView';
@@ -34,6 +36,10 @@ export interface OpenTab {
   before?: string;
   after?: string;
   agentPath?: string;
+  /** Blocks of the agent diff, for keep/ignore one at a time. */
+  hunks?: DiffHunk[];
+  keptHunks?: string[];
+  userEdited?: boolean;
   temp?: boolean;
   /** Cache-bust token for image reloads (e.g. plot popup rewrite). */
   mediaRev?: number;
@@ -72,6 +78,8 @@ export function EditorArea({
   onRemoveRepo,
   onCopyFiles,
   onPasteFiles,
+  onHunkDecision,
+  onOpenPath,
   onLoadDir,
 }: {
   tabs: OpenTab[];
@@ -107,6 +115,10 @@ export function EditorArea({
   onCopyFiles: (paths: string[], mode: 'copy' | 'cut') => void;
   onPasteFiles: (into: string) => void;
   onLoadDir: (dir: string) => void;
+  /** Keep or ignore one block of an agent diff. */
+  onHunkDecision?: (path: string, id: string, decision: 'keep' | 'ignore') => void;
+  /** Open the reviewed file as a normal editor tab. */
+  onOpenPath?: (path: string) => void;
 }) {
   const tab = tabs.find((item) => item.path === activePath) || null;
   const [tabMenu, setTabMenu] = useState<{ x: number; y: number; index: number } | null>(null);
@@ -362,6 +374,14 @@ export function EditorArea({
             )
             : tab.agentPath && tab.before !== undefined && tab.after !== undefined
             ? (
+              <>
+              <ReviewBlocks
+                hunks={tab.hunks ?? []}
+                kept={tab.keptHunks ?? []}
+                edited={Boolean(tab.userEdited)}
+                onDecide={(id, decision) => onHunkDecision?.(tab.path, id, decision)}
+                onOpenFile={() => onOpenPath?.(tab.path)}
+              />
               <DiffView
                 path={tab.path}
                 diff={tab.diff || ''}
@@ -369,6 +389,7 @@ export function EditorArea({
                 after={tab.after}
                 onEdit={(value) => onChange(tab.path, value)}
               />
+              </>
             )
             : tab.viewMode === 'rendered' && hasRenderedView(tab.kind)
             ? <Rendered tab={tab} onInfo={setViewInfo} onChange={onChange} />
