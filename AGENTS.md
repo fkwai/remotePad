@@ -62,6 +62,8 @@ UI regions (product names): **Sidebar** (left), **Editor** (middle top), **Termi
 | Favorites | `~/.remotepad/favorites.json` |
 | Host / ports | `settings.json` at install root (`host`, `port`, `uiPort`; env overrides) |
 | Agent model | `~/.remotepad/llm.json` (DeepSeek key + model + maxTokens; not in git). Host pop **Agent model** form. `GET/PUT /api/llm`. Default model `deepseek-flash` over OpenAI Chat Completions (`GAUZ_LLM_PROVIDER=openai`, `GAUZ_LLM_OPENAI_API_MODE=chat_completions`). Default max output tokens `32768` → `GAUZ_LLM_MAX_TOKENS`. Applied over XiaoBa `.env` on the next Agent message. |
+| Code intelligence (go to definition) | `apps/server/src/code/tsdef.ts` (TypeScript language service), `pydef.ts` (Python resolver), `routes/code.ts` (`POST /api/code/definition`); editor side in `EditorArea.tsx` |
+| Debugger (breakpoints, stepping) | `apps/server/src/debug/` (`node.ts` inspector, `python.ts` + `py-runner.py` tracer, `session.ts`, `ws.ts`), `routes/debug.ts`, `/ws/debug`; UI `components/DebugPanel.tsx`, `useDebug.ts` |
 | Viewer modules | `packages/shared/src/modules.ts` catalog; enabled flags in `~/.remotepad/modules.json`; `GET/PUT /api/modules`; Host pop (computer name) toggles load/unload. Core is always code + folder + diff. Optional: markdown, json, jsonl, csv, image, html, log. Disabled types open as code. New modules should `defaultOn: false`. |
 | UI session restore | `tmp/session.json` under this repo (`REMOTEPAD_SESSION_PATH` overrides) |
 | Update check / one-click pull | `apps/server/src/update.ts`, `routes/update.ts`, `apps/web/src/components/UpdateButton.tsx` |
@@ -114,7 +116,11 @@ If a job is about click / double-click / reveal / scroll, read this table first.
 | Editor **tab** | active | Bright left strip + bottom underline (`.tab.active`) |
 | Terminal panel | default | Open on load; top bar **Terminal** button or `Ctrl/⌘+\`` toggles show/hide |
 | Terminal | plots subpanel | Lists Plotly HTML from this term; closing the term clears its plots |
-| Editor **body** | right-click | Run line/selection · Save (hints Shift+Enter / Ctrl+S) |
+| Editor **gutter** | click a line | toggles a breakpoint (red dot, faint line); breakpoints survive tab switches and reloads (browser-local) |
+| Editor **body** | right-click | Go to definition · Add/Remove breakpoint · Debug this file · Run line/selection · Save/Revert (each with hint) |
+| Editor **body** | Ctrl/⌘+click · F12 | jump to the symbol's definition — same file, or the other file opens with the caret on the declaration; works on unsaved buffers |
+| Editor **body** | F5 | debug this file (Node/TS by inspector, Python by tracer); the Debug tab opens and the first stop is the entry |
+| Terminal bar | **Debug** tab | switches the bottom region to the debugger: status, Continue / Step over / into / out / Stop, call stack, variables, output, evaluate |
 | Editor **body** | Shift+Enter (`.py`) | Dedent selection and wrap in `exec(compile(...))` so REPL `if`/`else` blocks are not broken by blank lines; other languages paste raw |
 | Editor **body** (Monaco) | double-click | word select; not reveal-in-tree |
 | Editor **body** (PNG / HTML) | Ctrl+scroll | Zoom that preview only; does not zoom the browser page |
@@ -155,6 +161,35 @@ If a job is about click / double-click / reveal / scroll, read this table first.
 - Delivered chat: `~/.remotepad/history/{id}.jsonl`. XiaoBa model context: `~/.remotepad/xiaoba/data/sessions/{id}.jsonl` (XiaoBa rewrites it; tool text may be stubbed). Logger: `~/.remotepad/xiaoba/logs/` (not the chat). Active id / titles: `~/.remotepad/agent-active.json`.
 - ChangeTracker is per session. Snapshot file tools in `onToolStart` (catscompany skips `confirmToolExecution`, so confirm-hook snapshots never run). Do not call `.list()` on a missing tracker.
 - Helper worktree APIs remain in the host for now; the Agent UI does not expose Publish / Preview / Merge. Leave `helper-worktree.ts` alone unless the user asks to remove it.
+
+## Code intelligence + debugger
+
+Two capabilities that make the panel a repo-reading tool, not only an editor.
+
+**Definition lookup** — `POST /api/code/definition {path, line, column, text?}` →
+`{language, locations:[{path,line,column,name,kind,preview,external}]}`.
+TypeScript/JavaScript use a cached `ts.createLanguageService` rooted at the
+nearest `tsconfig.json` (else the git root); unsaved editor text is passed as
+`text` so a jump works before saving. Python has no language server: `self.x`
+resolves in the enclosing class, `obj: Class` / `obj = Class()` resolve the
+attribute on that class, `from x import y` / `import x.y` resolve the module, and
+a bounded workspace scan is the last resort. A miss returns a `note`, never a
+stack trace.
+
+**Debugging** — one session per file, max 4, state normalized across backends:
+`starting → running ⇄ paused → exited`.
+- Node/TS: `node --inspect-brk=127.0.0.1:0` (the `tsx` binary for `.ts`), CDP over
+  the inspector socket. `--inspect-brk` pauses at entry; the panel shows that stop
+  first, then Continue reaches user breakpoints.
+- Python: `python3 -u py-runner.py <script>` with `sys.settrace`, talking JSON
+  lines over a loopback socket. No debugpy, no venv change; tracing slows the
+  program (expected). Only lines under the project root are stepped into.
+- Breakpoints are `file + line`; the Node backend removes stale ids when a dot is
+  toggled off, Python replaces the whole set.
+- Controls are best-effort: a control while already running must be ignored, not
+  crash the server (this was a real crash: an unhandled rejection killed the API).
+- The Agent can drive the same API (start / breakpoints / control) and narrate;
+  `GET /api/debug/sessions` is the state the panel reads.
 
 ## Git
 

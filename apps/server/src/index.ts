@@ -20,6 +20,9 @@ import { registerCatsCoRoutes } from './routes/catsco.ts';
 import { registerAgentStateRoutes } from './routes/agent-state.ts';
 import { registerPreviewRoutes } from './routes/previews.ts';
 import { registerUpdateRoutes } from './routes/update.ts';
+import { registerCodeRoutes } from './routes/code.ts';
+import { registerDebugRoutes } from './routes/debug.ts';
+import { registerDebugSocket } from './debug/ws.ts';
 import { registerTermSocket } from './terminal/ws.ts';
 import { registerWatchSocket } from './watch.ts';
 import { registerAgentSocket } from './agent/ws.ts';
@@ -48,11 +51,14 @@ await registerModuleRoutes(app);
 await registerLlmRoutes(app);
 await registerCatsCoRoutes(app);
 await registerUpdateRoutes(app);
+await registerCodeRoutes(app);
+await registerDebugRoutes(app);
 await registerPreviewRoutes(app);
 await registerAgentStateRoutes(app);
 await registerTermSocket(app);
 await registerWatchSocket(app);
 await registerAgentSocket(app);
+await registerDebugSocket(app);
 
 // apps/server/src → apps/web/dist is two levels up; '../../../' pointed at
 // /workspace/git/web/dist, which never exists, so the build produced a server

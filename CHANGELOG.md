@@ -1,5 +1,25 @@
 # Changelog
 
+## Unreleased
+
+- **Go to definition** for JavaScript/TypeScript (TypeScript language service,
+  cross-file, honours tsconfig) and Python (`self.x`, annotations, imports,
+  workspace scan): right-click the editor → Go to definition, `Ctrl/⌘+click`, or
+  `F12`; the target file opens and the caret lands on the declaration. Works on
+  unsaved buffers too.
+- **Breakpoints + debugger**: click the editor gutter to toggle a breakpoint;
+  `F5` or the editor menu starts the file. Node/TypeScript runs under the
+  inspector (`node --inspect-brk`, `tsx` for TS), Python under a built-in tracer
+  (no debugpy install). The terminal region gains a **Debug** tab: call stack,
+  frame variables, program output, evaluate-in-frame, Continue / Step over /
+  Step into / Step out / Stop. Execution follows into the editor: each pause
+  opens the file and highlights the line.
+- Debug sessions are also drivable over HTTP (`POST /api/debug/start`,
+  `/api/debug/breakpoints`, `/api/debug/control`) so the Agent can set
+  breakpoints and narrate a run.
+- Server crash fix: a second Continue (or any control while running) used to be
+  an unhandled rejection and took the whole API down.
+
 ## 0.0.3 — 2026-10-26
 
 Promoted from the 2026-10-26 nightly.

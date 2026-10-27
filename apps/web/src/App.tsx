@@ -9,6 +9,8 @@ import { browserPadUrl, hasEntryDrag, readEntryDrag } from './dnd';
 import { LeftSidebar, type SideTab } from './components/LeftSidebar';
 import { EditorArea, type OpenTab } from './components/EditorArea';
 import { TerminalPanel } from './components/TerminalPanel';
+import { DebugPanel } from './components/DebugPanel';
+import { useDebug } from './useDebug';
 import { UpdateButton } from './components/UpdateButton';
 import { windowIdFromUrl, windowQuery, newWindowId, windowUrl } from './window';
 import { clearFileClipboard, fileClipboard, setFileClipboard } from './fileClipboard';
@@ -133,6 +135,55 @@ export function App() {
   const showToast = (msg: string) => {
     setToast(msg);
     window.setTimeout(() => setToast(null), 2800);
+  };
+
+  /* ---- code intelligence + debugger -------------------------------- */
+  const [breakpoints, setBreakpoints] = useState<Record<string, number[]>>(() => {
+    try {
+      return JSON.parse(localStorage.getItem('remotepad.breakpoints') || '{}') as Record<string, number[]>;
+    } catch {
+      return {};
+    }
+  });
+  const [revealTarget, setRevealTarget] = useState<{ path: string; line: number; column: number; token: number } | null>(null);
+  const [debugBottom, setDebugBottom] = useState(false);
+  const debug = useDebug(showToast);
+  const debugRef = useRef(debug);
+  debugRef.current = debug;
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('remotepad.breakpoints', JSON.stringify(breakpoints));
+    } catch {
+      // private mode / quota: breakpoints stay in memory
+    }
+  }, [breakpoints]);
+
+  const toggleBreakpoint = (path: string, line: number) => {
+    if (!path) return;
+    setBreakpoints((prev) => {
+      const list = prev[path] ?? [];
+      const next = list.includes(line)
+        ? list.filter((item) => item !== line)
+        : [...list, line].sort((a, b) => a - b);
+      return { ...prev, [path]: next };
+    });
+  };
+
+  const activeBreakpoints = () => Object.entries(breakpoints)
+    .flatMap(([path, lines]) => lines.map((line) => ({ path, line })));
+
+  // Breakpoints must reach a session that is already running; a new session
+  // receives them in the start request.
+  useEffect(() => {
+    if (!debug.state) return;
+    debugRef.current.syncBreakpoints(activeBreakpoints());
+  }, [breakpoints, debug.state?.id]);
+
+  const startDebug = (path: string) => {
+    setTermOpen(true);
+    setDebugBottom(true);
+    void debugRef.current.start(path, activeBreakpoints());
   };
 
   const loadDir = useCallback(async (dir: string) => {
@@ -693,6 +744,23 @@ export function App() {
     }
   };
   openFileRef.current = openFile;
+
+  /** Open a file and put the caret on a line (definition jump, paused frame). */
+  const openAt = async (path: string, line: number, column: number) => {
+    await openFile({ name: basename(path), path, kind: 'file' });
+    setRevealTarget({ path, line, column, token: Date.now() });
+  };
+  const openAtRef = useRef(openAt);
+  openAtRef.current = openAt;
+
+  // Follow the program: when it stops, show the line it stopped on.
+  const pausedFrame = debug.state?.status === 'paused' ? debug.state.frame : null;
+  useEffect(() => {
+    if (!pausedFrame) return;
+    setTermOpen(true);
+    setDebugBottom(true);
+    void openAtRef.current(pausedFrame.path, pausedFrame.line, pausedFrame.column || 1);
+  }, [pausedFrame?.path, pausedFrame?.line]);
 
   const openFolder = async (dir: string, opts?: { newTab?: boolean; from?: string; viewMode?: OpenTab['viewMode'] }) => {
     await loadDir(dir);
@@ -1549,6 +1617,13 @@ export function App() {
                   onCopyFiles={copyFiles}
                   onPasteFiles={(into) => void pasteFiles(into)}
                   onLoadDir={loadDir}
+                  breakpoints={breakpoints}
+                  onToggleBreakpoint={toggleBreakpoint}
+                  onStartDebug={startDebug}
+                  onOpenAt={(path, line, column) => void openAt(path, line, column)}
+                  revealTarget={revealTarget}
+                  pausedLine={pausedFrame && pausedFrame.path === activePath ? pausedFrame.line : null}
+                  onNotify={showToast}
                 />
               </Panel>
               {termOpen && (
@@ -1565,6 +1640,15 @@ export function App() {
                       onInput={(id, data) => sendTerm({ type: 'input', id, data })}
                       onResize={(id, cols, rows) => sendTerm({ type: 'resize', id, cols, rows })}
                       onDataRef={termWrite}
+                      debugActive={debugBottom}
+                      onToggleDebug={() => setDebugBottom((value) => !value)}
+                      debugStatus={debug.state ? debug.state.status : 'idle'}
+                      debugView={(
+                        <DebugPanel
+                          debug={debug}
+                          onReveal={(path, line, column) => void openAt(path, line, column)}
+                        />
+                      )}
                     />
                   </Panel>
                 </>

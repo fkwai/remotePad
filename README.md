@@ -344,6 +344,30 @@ Repos are listed in `~/.remotepad/workspaces.json`. Only Git repositories can be
 }
 ```
 
+## Reading a repo: definitions and breakpoints
+
+JavaScript/TypeScript and Python only, for now.
+
+- **Go to definition** — right-click the code (or `Ctrl/⌘+click`, `F12`). The
+  symbol under the cursor resolves to its declaration; another file opens with
+  the caret on that line. JS/TS use a real project index (`tsconfig`, imports,
+  cross-file), Python resolves `self.x`, parameter annotations, imports and
+  falls back to a workspace scan. Unsaved edits are used as-is.
+- **Breakpoints** — click the gutter left of a line number. A red dot stays on
+  the line and on that file's tab.
+- **Debug** — `F5` or the editor menu runs the file and opens the **Debug** tab in
+  the terminal region: status, call stack, variables in the selected frame,
+  program output, an evaluate box, and Continue / Step over / Step into / Step
+  out / Stop. Every stop reveals the line in the editor, so a run reads like a
+  walkthrough.
+  - Node and TypeScript run under Node's inspector (`tsx` runs `.ts`); the first
+    stop is the entry line, then Continue reaches your breakpoints.
+  - Python uses a built-in tracer: no `debugpy` install, no virtualenv change.
+    Stepping stays inside the project directory.
+- The same API is available to the Agent (`POST /api/debug/start`,
+  `/api/debug/breakpoints`, `/api/debug/control`), so it can set breakpoints and
+  narrate a run while you drive the terminal.
+
 ## Viewers
 
 Files open in a rendered view when RemotePad recognizes the type, with a Source toggle:

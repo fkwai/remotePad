@@ -16,7 +16,8 @@ import { HtmlView } from './viewers/HtmlView';
 import { LogView } from './viewers/LogView';
 import { FolderView } from './FolderView';
 import { DiffView } from './viewers/DiffView';
-import type { Favorite, FsEntry, Repo } from '@remotepad/shared';
+import type { DefinitionResponse, Favorite, FsEntry, Repo } from '@remotepad/shared';
+import { api } from '../api';
 
 export interface OpenTab {
   path: string;
@@ -73,6 +74,13 @@ export function EditorArea({
   onCopyFiles,
   onPasteFiles,
   onLoadDir,
+  breakpoints,
+  onToggleBreakpoint,
+  onStartDebug,
+  onOpenAt,
+  revealTarget,
+  pausedLine,
+  onNotify,
 }: {
   tabs: OpenTab[];
   activePath: string | null;
@@ -107,15 +115,37 @@ export function EditorArea({
   onCopyFiles: (paths: string[], mode: 'copy' | 'cut') => void;
   onPasteFiles: (into: string) => void;
   onLoadDir: (dir: string) => void;
+  /** Breakpoint lines per path (gutter dots). */
+  breakpoints?: Record<string, number[]>;
+  onToggleBreakpoint?: (path: string, line: number) => void;
+  onStartDebug?: (path: string) => void;
+  /** Open another file in the editor and put the caret on a position. */
+  onOpenAt?: (path: string, line: number, column: number) => void;
+  /** One-shot jump request from the app (definition click, paused frame). */
+  revealTarget?: { path: string; line: number; column: number; token: number } | null;
+  /** Line currently stopped at, when the debugger paused in this file. */
+  pausedLine?: number | null;
+  onNotify?: (message: string) => void;
 }) {
   const tab = tabs.find((item) => item.path === activePath) || null;
   const [tabMenu, setTabMenu] = useState<{ x: number; y: number; index: number } | null>(null);
-  const [edMenu, setEdMenu] = useState<{ x: number; y: number } | null>(null);
+  const [edMenu, setEdMenu] = useState<{ x: number; y: number; line: number; column: number } | null>(null);
   const [filesOpen, setFilesOpen] = useState(false);
   const [overflowing, setOverflowing] = useState(false);
   const tabsRef = useRef<HTMLDivElement>(null);
   const measureRef = useRef<HTMLDivElement>(null);
   const edRef = useRef<Parameters<OnMount>[0] | null>(null);
+  const monacoRef = useRef<Parameters<OnMount>[1] | null>(null);
+  const bpIds = useRef<Map<string, string[]>>(new Map());
+  const tabRef = useRef(tab);
+  tabRef.current = tab;
+  const toggleBreakpointRef = useRef(onToggleBreakpoint);
+  toggleBreakpointRef.current = onToggleBreakpoint;
+  const definitionRef = useRef<(line: number, column: number) => void>(() => undefined);
+  const startDebugRef = useRef(onStartDebug);
+  startDebugRef.current = onStartDebug;
+  const notifyRef = useRef(onNotify);
+  notifyRef.current = onNotify;
   /** Last text this editor reported, per path. Anything else is external. */
   const emitted = useRef<Map<string, string>>(new Map());
 
@@ -151,6 +181,96 @@ export function EditorArea({
   useEffect(() => {
     setViewInfo(null);
   }, [tab?.path]);
+
+  /** Put the caret on a position in the file this editor is showing. */
+  function revealInEditor(line: number, column: number) {
+    const editor = edRef.current;
+    if (!editor) return;
+    const apply = () => {
+      const model = editor.getModel();
+      if (!model || model.isDisposed() || line > model.getLineCount()) return false;
+      editor.revealLineInCenter(line);
+      editor.setPosition({ lineNumber: line, column: Math.min(column, model.getLineMaxColumn(line)) });
+      editor.focus();
+      return true;
+    };
+    if (apply()) return;
+    // The tab was just opened: the model arrives a frame or two later.
+    let tries = 0;
+    const timer = window.setInterval(() => {
+      tries += 1;
+      if (apply() || tries > 24) window.clearInterval(timer);
+    }, 50);
+  }
+
+  /**
+   * Resolve the symbol under the cursor. Same file reveals here; another file
+   * is handed to the app, which opens it and passes the position back as
+   * `revealTarget`.
+   */
+  const goToDefinitionAt = async (line: number, column: number) => {
+    const current = tabRef.current;
+    const model = edRef.current?.getModel();
+    if (!current || !model) return;
+    try {
+      const res = await api<DefinitionResponse>('/api/code/definition', {
+        method: 'POST',
+        body: JSON.stringify({
+          path: current.path,
+          line,
+          column,
+          text: current.dirty ? model.getValue() : undefined,
+        }),
+      });
+      const target = res.locations.find((item) => !item.external) || res.locations[0];
+      if (!target) {
+        notifyRef.current?.(res.note || `No definition for the symbol at ${line}:${column}`);
+        return;
+      }
+      if (target.path === current.path) revealInEditor(target.line, target.column);
+      else onOpenAt?.(target.path, target.line, target.column);
+    } catch (err) {
+      notifyRef.current?.(err instanceof Error ? err.message : String(err));
+    }
+  };
+  definitionRef.current = (line, column) => {
+    void goToDefinitionAt(line, column);
+  };
+
+  useEffect(() => {
+    if (!revealTarget || !tab || tab.loading || tab.path !== revealTarget.path) return;
+    revealInEditor(revealTarget.line, revealTarget.column);
+  }, [revealTarget?.token, tab?.path, tab?.loading]);
+
+  useEffect(() => {
+    const editor = edRef.current;
+    const monaco = monacoRef.current;
+    if (!editor || !monaco || !tab || tab.kind !== 'code' || tab.binary) return;
+    const lines = breakpoints?.[tab.path] ?? [];
+    const decorations = lines.map((line) => ({
+      range: new monaco.Range(line, 1, line, 1),
+      options: {
+        isWholeLine: true,
+        className: 'bp-line',
+        glyphMarginClassName: 'bp-dot',
+        glyphMarginHoverMessage: { value: 'Breakpoint · click to remove' },
+      },
+    }));
+    if (pausedLine) {
+      decorations.push({
+        range: new monaco.Range(pausedLine, 1, pausedLine, 1),
+        options: {
+          isWholeLine: true,
+          className: 'dbg-line',
+          glyphMarginClassName: 'dbg-arrow',
+          glyphMarginHoverMessage: { value: 'Paused here' },
+        },
+      });
+    }
+    const previous = bpIds.current.get(tab.path) ?? [];
+    const next = editor.deltaDecorations(previous, decorations);
+    bpIds.current.set(tab.path, next);
+  }, [tab?.path, tab?.kind, tab?.binary, breakpoints, pausedLine]);
 
   useLayoutEffect(() => {
     edRef.current?.layout();
@@ -272,13 +392,26 @@ export function EditorArea({
           x={edMenu.x}
           y={edMenu.y}
           items={[
+            { type: 'item', id: 'definition', label: 'Go to definition', hint: 'Ctrl/⌘+click · F12', disabled: tab.kind !== 'code' },
+            {
+              type: 'item',
+              id: 'breakpoint',
+              label: (breakpoints?.[tab.path] ?? []).includes(edMenu.line) ? 'Remove breakpoint' : 'Add breakpoint',
+              hint: 'Click the gutter',
+              disabled: tab.kind !== 'code',
+            },
+            { type: 'item', id: 'debug', label: 'Debug this file', hint: 'F5', disabled: tab.kind !== 'code' },
+            { type: 'sep' },
             { type: 'item', id: 'run', label: 'Run line / selection in terminal', hint: 'Shift+Enter' },
             { type: 'item', id: 'save', label: 'Save', hint: 'Ctrl/⌘+S', disabled: !tab.dirty },
             { type: 'item', id: 'revert', label: 'Revert', disabled: !revertOk(tab.path, tab.dirty) },
           ]}
           onClose={() => setEdMenu(null)}
           onAction={(id) => {
-            if (id === 'run' && edRef.current) {
+            if (id === 'definition') definitionRef.current(edMenu.line, edMenu.column);
+            else if (id === 'breakpoint') onToggleBreakpoint?.(tab.path, edMenu.line);
+            else if (id === 'debug') onStartDebug?.(tab.path);
+            else if (id === 'run' && edRef.current) {
               const text = textForTerminal(edRef.current);
               if (text) onRunInTerminal(text);
             } else if (id === 'save') onSave(tab.path);
@@ -398,12 +531,35 @@ export function EditorArea({
                     beforeMount={defineTheme}
                     onMount={(editor, monaco) => {
                       edRef.current = editor;
+                      monacoRef.current = monaco;
                       const run = () => {
                         const text = textForTerminal(editor);
                         if (text) onRunInTerminal(text);
                       };
                       editor.addCommand(monaco.KeyMod.Shift | monaco.KeyCode.Enter, run);
                       editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter, run);
+                      editor.addCommand(monaco.KeyCode.F12, () => {
+                        const position = editor.getPosition();
+                        if (position) definitionRef.current(position.lineNumber, position.column);
+                      });
+                      editor.addCommand(monaco.KeyCode.F5, () => {
+                        const current = tabRef.current;
+                        if (current && current.kind === 'code') startDebugRef.current?.(current.path);
+                      });
+                      editor.onMouseDown((event) => {
+                        const type = event.target.type;
+                        const position = event.target.position;
+                        if (!position) return;
+                        const inGutter = type === monaco.editor.MouseTargetType.GUTTER_GLYPH_MARGIN
+                          || type === monaco.editor.MouseTargetType.GUTTER_LINE_NUMBERS;
+                        if (inGutter) {
+                          toggleBreakpointRef.current?.(tabRef.current?.path || '', position.lineNumber);
+                          return;
+                        }
+                        if (event.event.ctrlKey || event.event.metaKey) {
+                          definitionRef.current(position.lineNumber, position.column);
+                        }
+                      });
                       const area = editor.getDomNode()?.querySelector('textarea');
                       if (area) {
                         area.setAttribute('spellcheck', 'false');
@@ -414,7 +570,14 @@ export function EditorArea({
                         const onMenu = (ev: MouseEvent) => {
                           ev.preventDefault();
                           ev.stopPropagation();
-                          setEdMenu({ x: ev.clientX, y: ev.clientY });
+                          const target = editor.getTargetAtClientPoint(ev.clientX, ev.clientY);
+                          const position = target?.position || editor.getPosition();
+                          setEdMenu({
+                            x: ev.clientX,
+                            y: ev.clientY,
+                            line: position?.lineNumber || 1,
+                            column: position?.column || 1,
+                          });
                         };
                         node.addEventListener('contextmenu', onMenu);
                         const onCopy = () => { captureCopy(); };
@@ -465,6 +628,7 @@ export function EditorArea({
                       fontSize: 13,
                       fontFamily: 'ui-monospace, Menlo, Monaco, Consolas, "Courier New", monospace',
                       minimap: { enabled: false },
+                      glyphMargin: true,
                       automaticLayout: true,
                       scrollBeyondLastLine: false,
                       wordWrap: 'on',

@@ -18,6 +18,10 @@ export function TerminalPanel({
   onInput,
   onResize,
   onDataRef,
+  debugActive,
+  onToggleDebug,
+  debugStatus,
+  debugView,
 }: {
   sessions: TermSessionInfo[];
   activeId: string | null;
@@ -28,6 +32,11 @@ export function TerminalPanel({
   onInput: (id: string, data: string) => void;
   onResize: (id: string, cols: number, rows: number) => void;
   onDataRef: React.MutableRefObject<(id: string, data: string) => void>;
+  /** Bottom region can show the debugger instead of a shell. */
+  debugActive?: boolean;
+  onToggleDebug?: () => void;
+  debugStatus?: string;
+  debugView?: React.ReactNode;
 }) {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const terms = useRef(new Map<string, { term: Terminal; fit: FitAddon; el: HTMLDivElement }>());
@@ -194,6 +203,17 @@ export function TerminalPanel({
           </div>
         ))}
         <button className="ghost" onClick={onCreate}>+ Terminal</button>
+        {onToggleDebug && (
+          <button
+            type="button"
+            className={`debug-tab ${debugActive ? 'active' : ''}`}
+            onClick={onToggleDebug}
+            title="Debugger — call stack, variables, step controls"
+          >
+            <span className={`status-dot ${debugStatus && debugStatus !== 'idle' ? '' : 'off'}`} />
+            Debug{debugStatus && debugStatus !== 'idle' ? ` · ${debugStatus}` : ''}
+          </button>
+        )}
       </div>
       {tabMenu && (
         <ActionMenu
@@ -214,8 +234,10 @@ export function TerminalPanel({
         />
       )}
       <div className="term-split">
+        {debugActive && debugView}
         <div
           className="term-body"
+          style={debugActive ? { display: 'none' } : undefined}
           ref={hostRef}
           onDragOver={(e) => e.preventDefault()}
           onDrop={(e) => {

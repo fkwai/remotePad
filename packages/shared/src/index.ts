@@ -147,6 +147,88 @@ export type TermServerMessage =
   | { type: 'closed'; id: string }
   | { type: 'error'; message: string };
 
+/** Where the cursor points, resolved to a definition (same file or elsewhere). */
+export interface DefinitionLocation {
+  path: string;
+  /** 1-based. */
+  line: number;
+  /** 1-based, UTF-16 column like Monaco. */
+  column: number;
+  name?: string;
+  kind?: string;
+  /** First line of the definition, for the hover/menu label. */
+  preview?: string;
+  /** True when the hit lives in node_modules / site-packages / a vendored dir. */
+  external?: boolean;
+}
+
+export interface DefinitionRequest {
+  path: string;
+  line: number;
+  column: number;
+  /** Unsaved buffer text; when present the index uses it instead of the disk. */
+  text?: string;
+}
+
+export interface DefinitionResponse {
+  language: 'typescript' | 'python' | 'none';
+  locations: DefinitionLocation[];
+  /** Human note when nothing was found (no project, syntax error, …). */
+  note?: string;
+}
+
+export type DebugLanguage = 'node' | 'python';
+export type DebugStatus = 'starting' | 'running' | 'paused' | 'exited';
+
+export interface DebugFrame {
+  id: number;
+  name: string;
+  path: string;
+  line: number;
+  column: number;
+}
+
+export interface DebugVariable {
+  name: string;
+  value: string;
+  type?: string;
+}
+
+export interface DebugSessionState {
+  id: string;
+  language: DebugLanguage;
+  path: string;
+  status: DebugStatus;
+  createdAt: number;
+  reason?: string;
+  frame: DebugFrame | null;
+  frames: DebugFrame[];
+  variables: DebugVariable[];
+  exitCode?: number | null;
+  error?: string;
+}
+
+export type DebugClientMessage =
+  | { type: 'breakpoints'; breakpoints: { path: string; line: number }[] }
+  | { type: 'resume' }
+  | { type: 'stepOver' }
+  | { type: 'stepInto' }
+  | { type: 'stepOut' }
+  | { type: 'pause' }
+  | { type: 'stop' }
+  | { type: 'variables'; frameId: number }
+  | { type: 'evaluate'; frameId: number; expression: string };
+
+export type DebugServerMessage =
+  | { type: 'state'; state: DebugSessionState }
+  | { type: 'paused'; state: DebugSessionState }
+  | { type: 'resumed'; state: DebugSessionState }
+  | { type: 'output'; stream: 'stdout' | 'stderr'; text: string }
+  | { type: 'exited'; state: DebugSessionState }
+  | { type: 'variables'; frameId: number; variables: DebugVariable[] }
+  | { type: 'evaluated'; frameId: number; expression: string; value: string; error?: string }
+  | { type: 'error'; message: string };
+
 export type WatchClientMessage =
   | { type: 'watch'; path: string }
   | { type: 'unwatch'; path: string };
