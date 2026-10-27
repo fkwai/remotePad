@@ -135,6 +135,35 @@ test.describe('code intelligence', () => {
     expect(found.locations[0].line).toBe(1);
   });
 
+  test('Python: instance attributes resolve from self, an instance and a parameter', () => {
+    const root = workspace();
+    const file = path.join(root, 'pkg', 'shape.py');
+    fs.writeFileSync(file, [
+      'class Box:',
+      '    def __init__(self):',
+      '        self.value = 1',
+      '',
+      '    def bump(self):',
+      '        self.value += 1',
+      '',
+      '',
+      'def touch(box):',
+      '    return box.value',
+      '',
+      '',
+      'b = Box()',
+      'b.bump()',
+      'b.value = 2',
+    ].join('\n'));
+
+    // `self.value` inside the class, `b.value` from a constructor assignment,
+    // and `box.value` on an untyped parameter: all land on the declaration.
+    for (const [line, column] of [[6, 14], [15, 3], [10, 17]]) {
+      const found = findPyDefinition(file, line, column);
+      expect(found.locations[0]).toMatchObject({ path: file, line: 3 });
+    }
+  });
+
   test('Python: a name with no declaration answers a note, not a crash', () => {
     const root = workspace();
     const file = path.join(root, 'pkg', 'app.py');

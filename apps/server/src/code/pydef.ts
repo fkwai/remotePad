@@ -240,6 +240,17 @@ function enclosingBlock(lines: string[], lineNo: number): { kind: 'class' | 'fun
   return best;
 }
 
+/** Nearest enclosing class of a line, walking past the method that contains it. */
+function enclosingClass(lines: string[], lineNo: number): string | null {
+  const current = indentOf(lines[lineNo - 1] ?? '');
+  for (let i = lineNo - 2; i >= 0; i -= 1) {
+    if (indentOf(lines[i]) >= current) continue;
+    const m = /^\s*class\s+([A-Za-z_]\w*)/.exec(lines[i]);
+    if (m) return m[1];
+  }
+  return null;
+}
+
 function asLocation(file: string, def: PyDef, lines: string[]): DefinitionLocation {
   return {
     path: file,
@@ -336,20 +347,46 @@ function classBodyDefs(lines: string[], className: string, name: string): PyDef[
     const end = blockEnd(lines, i);
     for (let j = i; j < end; j += 1) {
       const body = lines[j].trim();
-      if (!new RegExp(`^(?:async\\s+)?def\\s+${name}\\b`).test(body)
-        && !new RegExp(`^${name}\\s*(?::[^=]*)?=(?!=)`).test(body)) continue;
+      // `def name`, `name = …`, and instance attributes (`self.name = …`) all
+      // declare the member a reader is looking for.
+      const declares = new RegExp(`^(?:async\\s+)?def\\s+${name}\\b`).test(body)
+        || new RegExp(`^${name}\\s*(?::[^=]*)?=(?!=)`).test(body)
+        || new RegExp(`^self\\.${name}\\s*(?::[^=]*)?[+\\-*/|&]?=(?!=)`).test(body);
+      if (!declares) continue;
+      const isDef = body.startsWith('def') || body.startsWith('async');
       out.push({
         name,
         line: j + 1,
         column: indentOf(lines[j]) + 1,
         indent: indentOf(lines[j]),
-        kind: body.startsWith('def') || body.startsWith('async') ? 'function' : 'variable',
+        kind: isDef ? 'function' : 'variable',
         preview: body.slice(0, 160),
       });
     }
     return out;
   }
   return out;
+}
+
+/**
+ * Where `name` is declared as a member of a class in this file.
+ *
+ * Only returned when a single class declares it — otherwise the guess would be
+ * a coin flip. Within that class the first declaration wins (`__init__`'s
+ * assignment), because later ones are writes, not the definition.
+ */
+function anyClassMember(lines: string[], name: string): PyDef[] {
+  const owners = new Map<string, PyDef>();
+  for (let i = 0; i < lines.length; i += 1) {
+    const m = /^\s*class\s+([A-Za-z_]\w*)/.exec(lines[i]);
+    if (!m) continue;
+    for (const def of classBodyDefs(lines, m[1], name)) {
+      const existing = owners.get(m[1]);
+      if (!existing || def.line < existing.line) owners.set(m[1], def);
+    }
+  }
+  if (owners.size !== 1) return [];
+  return [...owners.values()];
 }
 
 export function findPyDefinition(
@@ -379,9 +416,9 @@ export function findPyDefinition(
   if (base) {
     const leaf = base.split('.').pop() || base;
     if (leaf === 'self' || leaf === 'cls') {
-      const block = enclosingBlock(lines, lineIndex + 1);
-      if (block?.kind === 'class') {
-        const defs = classBodyDefs(lines, block.name, name);
+      const className = enclosingClass(lines, lineIndex + 1);
+      if (className) {
+        const defs = classBodyDefs(lines, className, name);
         if (defs.length) return { locations: push(defs.map((def) => asLocation(file, def, lines))) };
       }
     }
@@ -402,6 +439,12 @@ export function findPyDefinition(
     if (typeName) {
       const defs = classBodyDefs(lines, typeName, name);
       if (defs.length) return { locations: push(defs.map((def) => asLocation(file, def, lines))) };
+    }
+    // No annotation: if exactly one class in this file has the member, that is
+    // the only reading the file supports.
+    const members = anyClassMember(lines, name);
+    if (members.length === 1) {
+      return { locations: push(members.map((def) => asLocation(file, def, lines))) };
     }
     // imported module: mod.attr / pkg.mod.attr
     const imported = imports.find((item) => item.local === leaf && !item.name);
