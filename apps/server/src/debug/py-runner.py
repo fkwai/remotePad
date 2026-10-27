@@ -137,6 +137,10 @@ class Tracer:
 
     # ---- tracing --------------------------------------------------------
     def in_root(self, filename):
+        # `<frozen runpy>` and other pseudo-files are not on disk; realpath would
+        # turn them into "<root>/<frozen runpy>" and keep machinery frames visible.
+        if not filename or not os.path.isabs(filename):
+            return False
         return os.path.realpath(filename).startswith(self.root + os.sep)
 
     def depth_of(self, frame):
@@ -189,7 +193,9 @@ class Tracer:
         chain = []
         walker = frame
         while walker is not None:
-            chain.append(walker)
+            # runpy / runner frames are machinery, not the code being read.
+            if walker is frame or self.in_root(walker.f_code.co_filename):
+                chain.append(walker)
             walker = walker.f_back
         self.frames = chain
         frames = []
