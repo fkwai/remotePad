@@ -4,7 +4,7 @@ import path from 'node:path';
 import { createRequire } from 'node:module';
 import { execFileSync } from 'node:child_process';
 import type { AgentBackend, AgentChange, AgentHistoryItem, AgentServerMessage, AgentSessionInfo, AgentStatus } from '@remotepad/shared';
-import { isHelperSessionId } from '@remotepad/shared';
+import { describeHunk, isHelperSessionId } from '@remotepad/shared';
 import { config } from '../config.ts';
 import { windowId } from '../session.ts';
 import { applyLlmSettingsToEnv } from '../llm-settings.ts';
@@ -23,6 +23,7 @@ import {
   type CatsCoConversation,
 } from '../catsco-chat.ts';
 import { ChangeTracker } from './changes.ts';
+import { ReviewLog } from './review.ts';
 import {
   QUIET_MS, TOOL_QUIET_MS, settleConversation, turnIsOpen, watchQuiet, type QuietWatch,
 } from './catsco-settle.ts';
@@ -771,6 +772,7 @@ export class AgentHost {
   private catscoUserUid = '';
   /** One tracker per session: a file touched by one chat must not show in another. */
   private trackers = new Map<string, ChangeTracker>();
+  private reviews = new Map<string, ReviewLog>();
   /** Paths already offered as "add this repo?" — asked once each. */
   private suggested = new Set<string>();
   /** Paths the user declined; quiet for the rest of this session. */
@@ -806,6 +808,17 @@ export class AgentHost {
     return this.backend === 'catsco'
       ? `catsco:${this.catscoTopic || '_none'}`
       : `local:${this.sessionId || '_none'}`;
+  }
+
+  /** Per-session review record: what was kept, ignored or edited, and who did it. */
+  private get review(): ReviewLog {
+    const id = this.sessionKey();
+    let log = this.reviews.get(id);
+    if (!log) {
+      log = new ReviewLog(id);
+      this.reviews.set(id, log);
+    }
+    return log;
   }
 
   private get tracker(): ChangeTracker {
@@ -1315,6 +1328,15 @@ export class AgentHost {
    * diagnostics endpoint; the Stop button has been wrong twice, so the state that
    * decides it must be inspectable from outside the process.
    */
+  /** What this session did to files, and what the next message will carry. */
+  reviewState() {
+    return {
+      ...this.review.summary(),
+      files: this.review.files(),
+      context: this.review.peekContext(),
+    };
+  }
+
   diagnostics() {
     return {
       backend: this.backend,
@@ -1756,8 +1778,13 @@ export class AgentHost {
   }
 
   async send(text: string): Promise<void> {
-    const message = text.trim();
-    if (!message) return;
+    const typed = text.trim();
+    if (!typed) return;
+    // The next message says what this session kept, ignored or edited. Consuming
+    // the record here is what makes it "since your last message" rather than a
+    // growing prefix on every turn.
+    const review = this.review.takeContext();
+    const message = review ? `${review}\n\n${typed}` : typed;
     if (this.backend === 'catsco') {
       await this.sendCatsCo(message);
       return;
@@ -2204,23 +2231,51 @@ export class AgentHost {
     this.emit({ type: 'status', state: 'idle', message: 'cleared' });
   }
 
+  /** Keep or ignore one block of a file's diff. */
+  async decideHunk(filePath: string, hunkId: string, decision: 'keep' | 'ignore'): Promise<void> {
+    const abs = filePath;
+    const hunk = this.tracker.hunksOf(abs).find((item) => item.id === hunkId);
+    const touched = await this.tracker.decideHunk(abs, hunkId, decision);
+    if (!touched.length) return;
+    this.review.record({
+      path: abs,
+      action: decision,
+      hunk: hunkId,
+      detail: hunk ? describeHunk(hunk) : undefined,
+    });
+    this.emitChanges(touched);
+  }
+
+  /** The user rewrote a reviewed file themselves; recorded for the next message. */
+  noteReviewEdited(filePath: string): void {
+    this.tracker.markUserEdited(filePath);
+    this.review.record({ path: filePath, action: 'edited' });
+    this.emitChanges([filePath]);
+  }
+
   async accept(filePath: string): Promise<void> {
     const touched = await this.tracker.accept(filePath);
+    this.review.record({ path: filePath, action: 'keep-all' });
     this.emitChanges(touched);
   }
 
   async undo(filePath: string): Promise<void> {
     const touched = await this.tracker.undo(filePath);
+    this.review.record({ path: filePath, action: 'undo-all' });
     this.emitChanges(touched);
   }
 
   async acceptAll(): Promise<void> {
+    const paths = this.tracker.list().map((item) => item.path);
     const touched = await this.tracker.acceptAll();
+    for (const item of paths) this.review.record({ path: item, action: 'keep-all' });
     this.emitChanges(touched);
   }
 
   async undoAll(): Promise<void> {
+    const paths = this.tracker.list().map((item) => item.path);
     const touched = await this.tracker.undoAll();
+    for (const item of paths) this.review.record({ path: item, action: 'undo-all' });
     this.emitChanges(touched);
   }
 

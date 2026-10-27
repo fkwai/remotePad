@@ -5,4 +5,8 @@ import { agentHostFor } from '../agent/host.ts';
 export async function registerAgentStateRoutes(app: FastifyInstance) {
   app.get<{ Querystring: { w?: string } }>('/api/agent/state', async (req) =>
     agentHostFor(req.query.w).diagnostics());
+
+  /** Which session changed which file, and the text its next message will carry. */
+  app.get<{ Querystring: { w?: string } }>('/api/agent/review', async (req) =>
+    agentHostFor(req.query.w).reviewState());
 }

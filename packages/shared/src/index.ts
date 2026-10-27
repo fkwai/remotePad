@@ -1,3 +1,5 @@
+import type { DiffHunk } from './hunks.ts';
+
 export type FsKind = 'file' | 'dir' | 'symlink';
 
 export interface FsEntry {
@@ -196,6 +198,8 @@ export interface GitDiffResponse {
   diff: string;
 }
 
+export { parseHunks, applyHunks, revertBlock, describeHunk, type DiffHunk } from './hunks.ts';
+
 export type AgentChangeKind = 'create' | 'modify' | 'delete';
 
 export interface AgentChange {
@@ -207,6 +211,12 @@ export interface AgentChange {
   before?: string;
   /** Full text after the edit (text files only). */
   after?: string;
+  /** The blocks of this diff, for keep/ignore one at a time. */
+  hunks?: DiffHunk[];
+  /** Blocks explicitly kept (the rest are undecided). */
+  keptHunks?: string[];
+  /** The user edited this file themselves during review. */
+  userEdited?: boolean;
 }
 
 export type AgentStatus = 'idle' | 'running' | 'error';
@@ -290,6 +300,10 @@ export type AgentClientMessage =
   | { type: 'repos_dismiss'; path: string }
   | { type: 'accept'; path: string }
   | { type: 'undo'; path: string }
+  /** Keep or ignore one block of a file's diff. */
+  | { type: 'hunk'; path: string; id: string; decision: 'keep' | 'ignore' }
+  /** The user rewrote a reviewed file; recorded for the next message. */
+  | { type: 'review_edited'; path: string }
   | { type: 'accept_all' }
   | { type: 'undo_all' }
   /** Write a line-edited body back for one tracked file (per-line keep/undo). */

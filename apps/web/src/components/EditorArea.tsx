@@ -5,6 +5,9 @@ import type { OnMount } from '@monaco-editor/react';
 import type { ViewerKind } from '../files';
 import { hasRenderedView, monacoLanguage, basename } from '../files';
 import { readEntryDrag, setEntryDrag } from '../dnd';
+import { decideSync } from '../editorSync';
+import { ReviewBlocks } from './ReviewBlocks';
+import type { DiffHunk } from '@remotepad/shared';
 import { ActionMenu, type MenuItem } from './ContextMenu';
 import { MarkdownView } from './viewers/MarkdownView';
 import { JsonView, parseJsonSafe } from './viewers/JsonView';
@@ -33,6 +36,10 @@ export interface OpenTab {
   before?: string;
   after?: string;
   agentPath?: string;
+  /** Blocks of the agent diff, for keep/ignore one at a time. */
+  hunks?: DiffHunk[];
+  keptHunks?: string[];
+  userEdited?: boolean;
   temp?: boolean;
   /** Cache-bust token for image reloads (e.g. plot popup rewrite). */
   mediaRev?: number;
@@ -71,6 +78,8 @@ export function EditorArea({
   onRemoveRepo,
   onCopyFiles,
   onPasteFiles,
+  onHunkDecision,
+  onOpenPath,
   onLoadDir,
 }: {
   tabs: OpenTab[];
@@ -106,6 +115,10 @@ export function EditorArea({
   onCopyFiles: (paths: string[], mode: 'copy' | 'cut') => void;
   onPasteFiles: (into: string) => void;
   onLoadDir: (dir: string) => void;
+  /** Keep or ignore one block of an agent diff. */
+  onHunkDecision?: (path: string, id: string, decision: 'keep' | 'ignore') => void;
+  /** Open the reviewed file as a normal editor tab. */
+  onOpenPath?: (path: string) => void;
 }) {
   const tab = tabs.find((item) => item.path === activePath) || null;
   const [tabMenu, setTabMenu] = useState<{ x: number; y: number; index: number } | null>(null);
@@ -115,6 +128,32 @@ export function EditorArea({
   const tabsRef = useRef<HTMLDivElement>(null);
   const measureRef = useRef<HTMLDivElement>(null);
   const edRef = useRef<Parameters<OnMount>[0] | null>(null);
+  /** Last text this editor reported, per path. Anything else is external. */
+  const emitted = useRef<Map<string, string>>(new Map());
+
+  /**
+   * Apply text that did not come from typing (disk reload, Agent sync, revert).
+   *
+   * Never while the buffer has unsaved edits — that is how a stray reload used to
+   * eat a paragraph and drop the caret at the end of the file. When it is applied,
+   * the cursor and scroll are restored so the reader keeps their place.
+   */
+  useEffect(() => {
+    const editor = edRef.current;
+    if (!editor || !tab || tab.kind === 'folder' || tab.kind === 'diff' || tab.binary) return;
+    const model = editor.getModel();
+    if (!model) return;
+    const decision = decideSync({
+      emitted: emitted.current.get(tab.path) ?? null,
+      incoming: tab.content,
+      dirty: tab.dirty,
+    });
+    if (decision !== 'apply') return;
+    const view = editor.saveViewState();
+    model.setValue(tab.content);
+    emitted.current.set(tab.path, tab.content);
+    if (view) editor.restoreViewState(view);
+  }, [tab?.path, tab?.content, tab?.dirty, tab?.kind, tab?.binary]);
   // The copy handler is registered once per Monaco instance; read the live tab
   // through a ref so it can never label a selection with another file's path.
   const activeTabRef = useRef(tab);
@@ -335,6 +374,14 @@ export function EditorArea({
             )
             : tab.agentPath && tab.before !== undefined && tab.after !== undefined
             ? (
+              <>
+              <ReviewBlocks
+                hunks={tab.hunks ?? []}
+                kept={tab.keptHunks ?? []}
+                edited={Boolean(tab.userEdited)}
+                onDecide={(id, decision) => onHunkDecision?.(tab.path, id, decision)}
+                onOpenFile={() => onOpenPath?.(tab.path)}
+              />
               <DiffView
                 path={tab.path}
                 diff={tab.diff || ''}
@@ -342,6 +389,7 @@ export function EditorArea({
                 after={tab.after}
                 onEdit={(value) => onChange(tab.path, value)}
               />
+              </>
             )
             : tab.viewMode === 'rendered' && hasRenderedView(tab.kind)
             ? <Rendered tab={tab} onInfo={setViewInfo} onChange={onChange} />
@@ -354,9 +402,20 @@ export function EditorArea({
                     height="100%"
                     width="100%"
                     theme="remotepad"
+                    /* One model per path: cursor, scroll and undo survive tab
+                       switches, and React no longer owns the text. */
+                    path={tab.path}
                     language={monacoLanguage(tab.path)}
-                    value={tab.content}
-                    onChange={(value) => onChange(tab.path, value ?? '')}
+                    /* defaultValue, not value: a controlled `value` makes the
+                       library replace the whole model whenever state changes,
+                       which teleported the caret to the last line. External text
+                       is applied below, only when nothing unsaved would be lost. */
+                    defaultValue={tab.content}
+                    onChange={(value) => {
+                      const text = value ?? '';
+                      emitted.current.set(tab.path, text);
+                      onChange(tab.path, text);
+                    }}
                     beforeMount={defineTheme}
                     onMount={(editor, monaco) => {
                       edRef.current = editor;

@@ -12,6 +12,7 @@ import { TerminalPanel } from './components/TerminalPanel';
 import { UpdateButton } from './components/UpdateButton';
 import { windowIdFromUrl, windowQuery, newWindowId, windowUrl } from './window';
 import { clearFileClipboard, fileClipboard, setFileClipboard } from './fileClipboard';
+import { mayReload } from './editorSync';
 import { RightDock } from './components/RightDock';
 import { TextClipMenu, ActionMenu } from './components/ContextMenu';
 import { HostPop } from './components/Popovers';
@@ -121,6 +122,14 @@ export function App() {
   const termOpenRef = useRef(termOpen);
   termOpenRef.current = termOpen;
   const agentMsgId = useRef(1);
+  /** Current round (one send → one answer); tool rows carry it so the step count
+   *  restarts at 1 per round instead of climbing across rounds. */
+  const agentRound = useRef(0);
+  /** Files whose "user edited" note has already gone to the server this round. */
+  const reviewEditedSent = useRef<Set<string>>(new Set());
+  /** Status as of the last message, updated synchronously: two status messages in
+   *  one frame must still count as two transitions (idle → running). */
+  const agentStatusRef = useRef<string>('idle');
   const sessionReady = useRef(false);
 
   const showToast = (msg: string) => {
@@ -614,6 +623,13 @@ export function App() {
     }
     const keep = !opts?.temp;
     const existing = tabsRef.current.find((tab) => tab.path === entry.path);
+    if (existing && opts?.reload && !mayReload(existing)) {
+      // A watcher event or a terminal "open" must not replace text the reader is
+      // still editing; it would also drop the caret at the end of the file.
+      setActivePath(entry.path);
+      showToast(`${entry.name} changed on disk — unsaved edits kept`);
+      return;
+    }
     if (existing && !opts?.reload) {
       if (keep && existing.temp) {
         setTabs((prev) => prev.map((tab) => tab.path === entry.path ? { ...tab, temp: false } : tab));
@@ -1060,6 +1076,9 @@ export function App() {
             before: change.before,
             after: change.after,
             agentPath: filePath,
+            hunks: change.hunks,
+            keptHunks: change.keptHunks,
+            userEdited: change.userEdited,
           }
           : item);
       }
@@ -1077,6 +1096,9 @@ export function App() {
         before: change.before,
         after: change.after,
         agentPath: filePath,
+        hunks: change.hunks,
+        keptHunks: change.keptHunks,
+        userEdited: change.userEdited,
       };
       return [tab, ...rest];
     });
@@ -1122,6 +1144,9 @@ export function App() {
           before: change.before,
           after: change.after,
           agentPath: tab.path,
+          hunks: change.hunks,
+          keptHunks: change.keptHunks,
+          userEdited: change.userEdited,
         };
       }));
     }
@@ -1149,6 +1174,9 @@ export function App() {
           diff: change.diff,
           before: change.before,
           after: change.after,
+          hunks: change.hunks,
+          keptHunks: change.keptHunks,
+          userEdited: change.userEdited,
         };
       })
       .filter((tab): tab is OpenTab => Boolean(tab)));
@@ -1189,6 +1217,7 @@ export function App() {
         // so the old guard left Local blank.
         setAgentMessages((prev) => (replace || prev.length === 0 ? mapped : prev));
       }
+      agentStatusRef.current = msg.error ? 'error' : 'idle';
       setAgentState((prev) => {
         if (msg.error) return 'error';
         // Session / backend switches must leave Working; only keep running for same-tab hello.
@@ -1225,6 +1254,7 @@ export function App() {
         return [...prev, { id: agentMsgId.current++, role: 'assistant', text: msg.text }];
       });
     } else if (msg.type === 'tool_start') {
+      const round = agentRound.current;
       setAgentMessages((prev) => [...prev, {
         id: agentMsgId.current++,
         role: 'tool',
@@ -1232,6 +1262,7 @@ export function App() {
         text: '',
         toolId: msg.id,
         input: msg.input ? compactInput(msg.input) : '',
+        round,
       }]);
     } else if (msg.type === 'tool_end') {
       const print = msg.result || '';
@@ -1256,8 +1287,18 @@ export function App() {
         return [...next, { id: agentMsgId.current++, role: 'tool', name: msg.name, text: print, toolId: msg.id }];
       });
     } else if (msg.type === 'status') {
+      // A round begins when the server goes running. Counting on that transition
+      // (not on every tool row) is what makes "step 1" mean the first step of
+      // this round, even when the previous round ended on a step.
+      if (msg.state === 'running' && agentStatusRef.current !== 'running') {
+        agentRound.current += 1;
+      }
+      agentStatusRef.current = msg.state;
       setAgentState(msg.state);
-      if (msg.message === 'cleared' || msg.message === 'new') setAgentMessages([]);
+      if (msg.message === 'cleared' || msg.message === 'new') {
+        agentRound.current = 0;
+        setAgentMessages([]);
+      }
     } else if (msg.type === 'changes') {
       // Another conversation's edits must not paint this tree: the socket is
       // shared, so the key decides.
@@ -1481,6 +1522,13 @@ export function App() {
                     });
                   }}
                   onChange={(path, content) => {
+                    const reviewTab = tabsRef.current.find((tab) => tab.path === path && tab.agentPath);
+                    if (reviewTab && !reviewEditedSent.current.has(path)) {
+                      // Told once per file: the record says "you edited it", and
+                      // repeating it every keystroke would bury the real signal.
+                      reviewEditedSent.current.add(path);
+                      sendAgent({ type: 'review_edited', path });
+                    }
                     setTabs((prev) => prev.map((tab) => tab.path === path ? {
                       ...tab,
                       content,
@@ -1522,6 +1570,11 @@ export function App() {
                   onCopyFiles={copyFiles}
                   onPasteFiles={(into) => void pasteFiles(into)}
                   onLoadDir={loadDir}
+                  onHunkDecision={(path, id, decision) => sendAgent({ type: 'hunk', path, id, decision })}
+                  onOpenPath={(path) => {
+                    const tab = tabsRef.current.find((item) => item.path === path);
+                    if (tab) setTabs((prev) => prev.map((item) => item.path === path ? { ...item, agentPath: undefined } : item));
+                  }}
                 />
               </Panel>
               {termOpen && (

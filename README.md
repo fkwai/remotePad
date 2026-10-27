@@ -314,6 +314,8 @@ Click **RemotePad** in the top-left for the version panel: release version, bran
 - `Ctrl/Cmd+L` source / rendered · click the address bar, `Enter` opens the path
 - `Ctrl+`` toggle terminal
 - `Shift+Enter` / `Ctrl/Cmd+Enter` run line or selection in the terminal
+- Review the agent's edit **block by block**: open the change, then **Keep** or **Ignore** each block. Ignore reverts only that block — the rest stays applied. Every decision, and any edit you make yourself, is recorded per conversation and carried into your next message in that session
+- `GET /api/agent/review` shows which session decided what, and the exact text the next message will carry
 - Copy / cut files: select in the tree or an Explorer, `Ctrl/Cmd+C` or `Ctrl/Cmd+X`, then `Ctrl/Cmd+V` in the target folder (or right-click → **Copy** / **Cut** / **Paste here**). A copy next to the original lands as `name copy.ext`; pasting into another folder keeps the name
 - Click a file to temp-open; right-click the file or tab → **Keep tab open**
 - Click a folder to expand; right-click → **Open in Explorer**

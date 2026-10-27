@@ -4,7 +4,10 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
-import type { AgentChange, AgentChangeKind } from '@remotepad/shared';
+import {
+  parseHunks, revertBlock,
+  type AgentChange, type AgentChangeKind, type DiffHunk,
+} from '@remotepad/shared';
 import { config } from '../config.ts';
 
 const execFileAsync = promisify(execFile);
@@ -38,6 +41,12 @@ export class ChangeTracker {
   private entries = new Map<string, Entry>();
   /** Content the user already accepted; the reference for the next write. */
   private accepted = new Map<string, Snap>();
+  /** Blocks the user explicitly kept, per file (ids survive re-diffs). */
+  private kept = new Map<string, Set<string>>();
+  /** Files the user edited themselves during review. */
+  private edited = new Set<string>();
+  /** Content this tracker wrote itself, to tell a decision from an outside write. */
+  private written = new Map<string, string>();
 
   /** Persist the accepted baselines for this conversation.
    *
@@ -45,13 +54,17 @@ export class ChangeTracker {
    * broke that promise on the next restart: the reference fell back to HEAD, and
    * every kept file came back as a fresh change.
    */
-  constructor(private readonly key = 'default') {
+  constructor(
+    private readonly key = 'default',
+    /** Where accepted baselines live; injectable so tests never touch $HOME. */
+    private readonly baseDir = path.join(os.homedir(), '.remotepad', 'accepted'),
+  ) {
     this.loadAccepted();
   }
 
   private acceptedFile(): string {
     const safe = this.key.replace(/[^a-zA-Z0-9_.-]/g, '_');
-    return path.join(os.homedir(), '.remotepad', 'accepted', `${safe}.json`);
+    return path.join(this.baseDir, `${safe}.json`);
   }
 
   private loadAccepted(): void {
@@ -96,6 +109,15 @@ export class ChangeTracker {
           change.before = before;
           change.after = after;
         }
+        // Block-level review: the hunks this diff is made of, and what has been
+        // decided about them so far.
+        const hunks = entry.current.binary ? [] : parseHunks(entry.diff);
+        if (hunks.length) {
+          change.hunks = hunks;
+          const kept = this.kept.get(filePath);
+          change.keptHunks = kept ? hunks.filter((h) => kept.has(h.id)).map((h) => h.id) : [];
+        }
+        if (this.edited.has(filePath)) change.userEdited = true;
         return change;
       });
   }
@@ -166,11 +188,56 @@ export class ChangeTracker {
     return true;
   }
 
+  /** The hunks of one file right now; used to describe a decision in the log. */
+  hunksOf(filePath: string): DiffHunk[] {
+    const entry = this.entries.get(path.resolve(filePath));
+    return entry && !entry.current.binary ? parseHunks(entry.diff) : [];
+  }
+
+  /**
+   * Keep or ignore one block.
+   *
+   * Keep records the decision and leaves the bytes alone (they are already the
+   * agent's). Ignore rebuilds the file with every other block applied and this one
+   * reverted — a real revert of one block, not a note beside it.
+   */
+  async decideHunk(filePath: string, hunkId: string, decision: 'keep' | 'ignore'): Promise<string[]> {
+    const abs = path.resolve(filePath);
+    const entry = this.entries.get(abs);
+    if (!entry || isRuntimePath(abs)) return [];
+    const hunks = parseHunks(entry.diff);
+    if (!hunks.some((hunk) => hunk.id === hunkId)) return [];
+
+    if (decision === 'keep') {
+      const set = this.kept.get(abs) ?? new Set<string>();
+      set.add(hunkId);
+      this.kept.set(abs, set);
+      return [abs];
+    }
+
+    const before = entry.original.binary ? '' : (entry.original.text ?? '');
+    const next = revertBlock(before, entry.diff, hunkId);
+    if (next === null) return [];
+    await fs.writeFile(abs, next, 'utf8');
+    this.written.set(abs, next);
+    // The decision is history now: the block is gone from the file.
+    this.kept.delete(abs);
+    await this.refresh(abs);
+    return [abs];
+  }
+
+  /** The user rewrote the file during review. Recorded, never inferred. */
+  markUserEdited(filePath: string): void {
+    this.edited.add(path.resolve(filePath));
+  }
+
   async accept(filePath: string): Promise<string[]> {
     const abs = path.resolve(filePath);
     const entry = this.entries.get(abs);
     if (entry) this.accepted.set(abs, entry.current);
     this.entries.delete(abs);
+    this.kept.delete(abs);
+    this.edited.delete(abs);
     this.saveAccepted();
     return [abs];
   }
@@ -197,6 +264,8 @@ export class ChangeTracker {
     const paths = [...this.entries.keys()];
     for (const [abs, entry] of this.entries) this.accepted.set(abs, entry.current);
     this.entries.clear();
+    this.kept.clear();
+    this.edited.clear();
     this.saveAccepted();
     return paths;
   }
@@ -209,12 +278,19 @@ export class ChangeTracker {
       if (entry) await restoreSnap(filePath, entry.original);
     }
     this.entries.clear();
+    this.kept.clear();
+    this.edited.clear();
     return paths;
   }
 
   /** Forgets entries owned by another session so they never show up here. */
   drop(paths: string[]): void {
-    for (const filePath of paths) this.entries.delete(path.resolve(filePath));
+    for (const filePath of paths) {
+      const abs = path.resolve(filePath);
+      this.entries.delete(abs);
+      this.kept.delete(abs);
+      this.edited.delete(abs);
+    }
   }
 
   private dropIgnored(): void {
