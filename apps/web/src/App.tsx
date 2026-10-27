@@ -12,6 +12,7 @@ import { TerminalPanel } from './components/TerminalPanel';
 import { UpdateButton } from './components/UpdateButton';
 import { windowIdFromUrl, windowQuery, newWindowId, windowUrl } from './window';
 import { clearFileClipboard, fileClipboard, setFileClipboard } from './fileClipboard';
+import { mayReload } from './editorSync';
 import { RightDock } from './components/RightDock';
 import { TextClipMenu, ActionMenu } from './components/ContextMenu';
 import { HostPop } from './components/Popovers';
@@ -614,6 +615,13 @@ export function App() {
     }
     const keep = !opts?.temp;
     const existing = tabsRef.current.find((tab) => tab.path === entry.path);
+    if (existing && opts?.reload && !mayReload(existing)) {
+      // A watcher event or a terminal "open" must not replace text the reader is
+      // still editing; it would also drop the caret at the end of the file.
+      setActivePath(entry.path);
+      showToast(`${entry.name} changed on disk — unsaved edits kept`);
+      return;
+    }
     if (existing && !opts?.reload) {
       if (keep && existing.temp) {
         setTabs((prev) => prev.map((tab) => tab.path === entry.path ? { ...tab, temp: false } : tab));
