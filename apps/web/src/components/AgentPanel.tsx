@@ -16,6 +16,14 @@ export type AgentChatMessage = {
   name?: string;
   toolId?: string;
   input?: string;
+  /**
+   * Which round (one send → one answer) this row belongs to.
+   *
+   * Rounds are not separated in the transcript when the agent ends on a step and
+   * the next round starts without prose, so counting "consecutive tool rows" made
+   * the label say "step 14" for the first step of a new round.
+   */
+  round?: number;
 };
 
 export function AgentPanel({
@@ -984,11 +992,13 @@ function groupTurns(messages: AgentChatMessage[]): Turn[] {
   let toolBuf: AgentChatMessage[] = [];
   const flushTools = () => {
     if (toolBuf.length === 0) return;
-    out.push({ key: `tools-${toolBuf[0]!.id}`, role: 'tools', tools: toolBuf });
+    out.push({ key: `tools-${toolBuf[0]!.round ?? 0}-${toolBuf[0]!.id}`, role: 'tools', tools: toolBuf });
     toolBuf = [];
   };
   for (const item of messages) {
     if (item.role === 'tool') {
+      // A new round starts a new group even with no prose in between.
+      if (toolBuf.length > 0 && toolBuf[0]!.round !== item.round) flushTools();
       toolBuf.push(item);
       continue;
     }

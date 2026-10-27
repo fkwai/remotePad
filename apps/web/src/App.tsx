@@ -122,6 +122,12 @@ export function App() {
   const termOpenRef = useRef(termOpen);
   termOpenRef.current = termOpen;
   const agentMsgId = useRef(1);
+  /** Current round (one send → one answer); tool rows carry it so the step count
+   *  restarts at 1 per round instead of climbing across rounds. */
+  const agentRound = useRef(0);
+  /** Status as of the last message, updated synchronously: two status messages in
+   *  one frame must still count as two transitions (idle → running). */
+  const agentStatusRef = useRef<string>('idle');
   const sessionReady = useRef(false);
 
   const showToast = (msg: string) => {
@@ -1197,6 +1203,7 @@ export function App() {
         // so the old guard left Local blank.
         setAgentMessages((prev) => (replace || prev.length === 0 ? mapped : prev));
       }
+      agentStatusRef.current = msg.error ? 'error' : 'idle';
       setAgentState((prev) => {
         if (msg.error) return 'error';
         // Session / backend switches must leave Working; only keep running for same-tab hello.
@@ -1233,6 +1240,7 @@ export function App() {
         return [...prev, { id: agentMsgId.current++, role: 'assistant', text: msg.text }];
       });
     } else if (msg.type === 'tool_start') {
+      const round = agentRound.current;
       setAgentMessages((prev) => [...prev, {
         id: agentMsgId.current++,
         role: 'tool',
@@ -1240,6 +1248,7 @@ export function App() {
         text: '',
         toolId: msg.id,
         input: msg.input ? compactInput(msg.input) : '',
+        round,
       }]);
     } else if (msg.type === 'tool_end') {
       const print = msg.result || '';
@@ -1264,8 +1273,18 @@ export function App() {
         return [...next, { id: agentMsgId.current++, role: 'tool', name: msg.name, text: print, toolId: msg.id }];
       });
     } else if (msg.type === 'status') {
+      // A round begins when the server goes running. Counting on that transition
+      // (not on every tool row) is what makes "step 1" mean the first step of
+      // this round, even when the previous round ended on a step.
+      if (msg.state === 'running' && agentStatusRef.current !== 'running') {
+        agentRound.current += 1;
+      }
+      agentStatusRef.current = msg.state;
       setAgentState(msg.state);
-      if (msg.message === 'cleared' || msg.message === 'new') setAgentMessages([]);
+      if (msg.message === 'cleared' || msg.message === 'new') {
+        agentRound.current = 0;
+        setAgentMessages([]);
+      }
     } else if (msg.type === 'changes') {
       // Another conversation's edits must not paint this tree: the socket is
       // shared, so the key decides.
