@@ -141,6 +141,19 @@ input:focus { border-color: #4a7f73; }
   cursor: pointer;
 }
 .brand:hover { background: var(--panel-3); }
+/* Wordmark stays; version and channel ride beside it. */
+.brand-name { font-weight: 650; }
+/* The corner carries version and channel, nothing else. */
+.brand-version { font-variant-numeric: tabular-nums; }
+.brand-channel {
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  color: var(--faint);
+  padding: 1px 5px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
 .brand-mark {
   width: 8px;
   height: 8px;
@@ -321,6 +334,61 @@ input:focus { border-color: #4a7f73; }
   padding: 3px 0; font-size: 12px;
 }
 .version-preview-name { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Saved windows: a row you click to open, with its own delete. */
+/* Title line carries state that used to be a five-row table. */
+.version-title { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px; }
+.version-dirty,
+.version-drift {
+  font-size: 10px;
+  color: var(--faint);
+  padding: 0 5px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+.version-windows { margin-top: 10px; }
+.version-window-new { font-size: 11px; padding: 0 6px; }
+.version-refresh { font-size: 12px; padding: 0 6px; line-height: 1; }
+
+.version-window {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  border-radius: 5px;
+}
+.version-window:hover { background: var(--panel-3); }
+.version-window.current { background: var(--panel-3); }
+.version-window-open {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  background: none;
+  border: 0;
+  padding: 4px 6px;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  font: inherit;
+}
+.version-window-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.version-window-id {
+  margin-left: auto;
+  font-size: 10px;
+  color: var(--faint);
+  font-variant-numeric: tabular-nums;
+}
+.version-window-del {
+  flex: none;
+  padding: 0 6px;
+  color: var(--faint);
+}
+.version-window-del:hover { color: var(--danger, #ff6b6b); }
+
 .version-preview-port { font-family: var(--mono); font-size: 11px; color: #a9c6f2; }
 .version-preview.live .version-preview-name::before {
   content: ''; display: inline-block; width: 6px; height: 6px; border-radius: 50%;
@@ -890,6 +958,93 @@ button.tree-node:hover { border-color: transparent; }
 .monaco-editor .scrollbar.vertical {
   right: 0 !important;
 }
+/* Two editors side by side. Both are the same component, so tabs, dirty state
+   and disk reloads stay shared; only the visible file differs. */
+.editor-split {
+  display: flex;
+  height: 100%;
+  min-height: 0;
+  min-width: 0;
+}
+.editor-pane {
+  display: flex;
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: 0;
+}
+/* The pane is a row flex container, so its child would size to content: the tab
+   bar stopped at 239px and the split looked like it ended two thirds across. */
+.editor-pane > .pane {
+  flex: 1 1 auto;
+  width: 100%;
+  min-width: 0;
+}
+/* Which pane the next file click lands in. Without this the split felt random:
+   the focus was sticky and completely invisible. */
+.editor-split.split .editor-pane { position: relative; }
+.editor-split.split .editor-pane.focused::before {
+  content: '';
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 2px;
+  background: var(--accent);
+  z-index: 3;
+  pointer-events: none;
+}
+.editor-split.split .editor-pane:not(.focused)::before {
+  content: '';
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 2px;
+  background: transparent;
+}
+
+/* The split control belongs in the corner, not after whatever tabs exist. */
+/* The pair is pushed right; Files stays the outer button. */
+.split-toggle { margin-left: auto; }
+/* Drag handle between the two editors. Wide enough to grab, quiet enough not
+   to look like a scrollbar. */
+.editor-divider {
+  flex: 0 0 5px;
+  cursor: col-resize;
+  background: var(--border);
+  position: relative;
+}
+.editor-divider::after {
+  content: '';
+  position: absolute;
+  inset: 0 -3px;
+}
+.editor-divider:hover { background: var(--accent, #4a7dff); }
+
+.editor-pane.secondary {
+  border-left: 1px solid var(--border);
+}
+.editor-split:not(.split) .editor-pane { flex: 1 1 100%; }
+/* Match .tabs-bar exactly: a shorter bar made the right pane look cramped. */
+.split-head { gap: 6px; }
+.split-head .tabs { flex: 1 1 auto; }
+.split-head .tab { cursor: default; }
+.split-name {
+  font-size: 12px;
+  color: var(--faint);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* Icon buttons: square, same weight, pinned to the right edge of the editor. */
+.files-toggle,
+.split-toggle {
+  width: 28px;
+  padding: 0;
+  font-size: 14px;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.split-toggle.on { color: var(--text); }
+
 .editor-main {
   flex: 1 1 auto;
   min-height: 0;

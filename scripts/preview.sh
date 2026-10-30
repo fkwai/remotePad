@@ -101,9 +101,11 @@ check_one() {
 
   for path in / /api/machine /api/favorites /api/repos /api/session /api/modules /api/update /api/previews; do
     if [ "$path" = / ]; then
-      code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 "http://127.0.0.1:$ui/")
+      # `|| true`: a dead port must be reported by the loop, not abort the
+      # script under `set -e` — that hid the failure it exists to catch.
+      code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 "http://127.0.0.1:$ui/" || true)
     else
-      code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 "http://127.0.0.1:$api$path")
+      code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 "http://127.0.0.1:$api$path" || true)
     fi
     printf '  %-16s %s\n' "$path" "$code"
     case "$code" in 2*|3*) ;; *) fail=1 ;; esac

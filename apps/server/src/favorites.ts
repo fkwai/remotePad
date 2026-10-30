@@ -3,8 +3,10 @@ import os from 'node:os';
 import path from 'node:path';
 import type { Favorite } from '@remotepad/shared';
 import { PathError, resolveSafe } from './paths.ts';
+import { sharedStateFile } from './state-paths.ts';
 
-const FILE = path.join(os.homedir(), '.remotepad', 'favorites.json');
+// Shared with the live instance: this is the user's list, not one preview's.
+const FILE = sharedStateFile('favorites.json');
 
 interface Store {
   seeded?: boolean;

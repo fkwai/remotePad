@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Panel, PanelGroup, PanelResizeHandle } from 'react-resizable-panels';
-import type { AgentBackend, AgentCatsCoList, AgentChange, AgentClientMessage, AgentServerMessage, AgentSessionInfo, AgentStatus, Favorite, FsEntry, FsListResponse, FsReadResponse, FsStatResponse, GitDiffResponse, GitStatusResponse, MachineInfo, ModulesResponse, Repo, ReposResponse, SessionState, TermClientMessage, TermServerMessage, TermSessionInfo, ViewerEnabledMap, ViewerModuleId, WatchServerMessage } from '@remotepad/shared';
+import { Panel, PanelGroup, PanelResizeHandle, type ImperativePanelGroupHandle } from 'react-resizable-panels';
+import type { AgentBackend, AgentCatsCoList, AgentChange, AgentClientMessage, AgentServerMessage, AgentSessionInfo, AgentStatus, Favorite, FsEntry, FsListResponse, FsReadResponse, FsStatResponse, GitDiffResponse, GitStatusResponse, MachineInfo, ModulesResponse, Repo, ReposResponse, SessionState, TermClientMessage, TermServerMessage, TermSessionInfo, ViewerEnabledMap, ViewerModuleId, WatchServerMessage, SessionSizes } from '@remotepad/shared';
 import { defaultViewerEnabled } from '@remotepad/shared';
 import { api } from './api';
 import { basename, dirname, hasRenderedView, viewerKind } from './files';
@@ -10,11 +10,11 @@ import { LeftSidebar, type SideTab } from './components/LeftSidebar';
 import { EditorArea, type OpenTab } from './components/EditorArea';
 import { TerminalPanel } from './components/TerminalPanel';
 import { UpdateButton } from './components/UpdateButton';
-import { windowIdFromUrl, windowQuery, newWindowId, windowUrl } from './window';
+import { windowIdFromUrl, windowQuery } from './window';
 import { clearFileClipboard, fileClipboard, setFileClipboard } from './fileClipboard';
 import { mayReload } from './editorSync';
 import { RightDock } from './components/RightDock';
-import { TextClipMenu, ActionMenu } from './components/ContextMenu';
+import { TextClipMenu } from './components/ContextMenu';
 import { HostPop } from './components/Popovers';
 import { VersionPop } from './components/VersionPop';
 import type { AgentChatMessage } from './components/AgentPanel';
@@ -42,11 +42,33 @@ export function App() {
   const [controlPath, setControlPath] = useState<string | null>(null);
   const [repoPath, setRepoPath] = useState<string | null>(null);
   const [sideTab, setSideTab] = useState<SideTab>('favorites');
+  /** Second editor pane. Null = one editor, which is the default for everyone. */
+  const [splitPath, setSplitPath] = useState<string | null>(null);
+  /** Which pane a file click lands in. */
+  const [focusedPane, setFocusedPane] = useState<'left' | 'right'>('left');
+  /** Left editor pane share of the split; dragged by the divider. */
+  const [splitRatio, setSplitRatio] = useState(0.5);
+  /** Panel-group layout in percent, kept in the window profile. */
+  const [sizes, setSizes] = useState<SessionSizes>({});
   const [versionOpen, setVersionOpen] = useState(false);
-  const [brandMenu, setBrandMenu] = useState<{ x: number; y: number } | null>(null);
+  /** Version + channel, the only chrome the corner needs. */
+  const [meta, setMeta] = useState<{ version?: string; channel?: string; head?: string }>({});
   /** This tab's window id (`?w=`); 'default' for an ordinary link. */
   const win = useRef(windowIdFromUrl()).current;
   const winQuery = windowQuery(win);
+
+  useEffect(() => {
+    let cancelled = false;
+    // The corner label needs version, channel and commit — all local. Asking the
+    // full endpoint here fired a git fetch to origin on every page load, for
+    // numbers this label never shows.
+    api<{ version?: string; channel?: string; head?: string }>('/api/update?remote=0')
+      .then((next) => { if (!cancelled) setMeta(next); })
+      .catch(() => undefined);
+    return () => { cancelled = true; };
+  }, []);
+
+  /** Refresh the profile list whenever the corner menu opens. */
   const [hostOpen, setHostOpen] = useState(false);
   const [moduleEnabled, setModuleEnabled] = useState<Record<ViewerModuleId, boolean>>(defaultViewerEnabled);
   const moduleEnabledRef = useRef(moduleEnabled);
@@ -118,6 +140,69 @@ export function App() {
   const expandedRef = useRef(expanded);
   expandedRef.current = expanded;
   const sideTabRef = useRef(sideTab);
+  const splitPathRef = useRef(splitPath);
+  splitPathRef.current = splitPath;
+  const splitRatioRef = useRef(splitRatio);
+  splitRatioRef.current = splitRatio;
+  const sizesRef = useRef(sizes);
+  sizesRef.current = sizes;
+  const profileLoadedRef = useRef(false);
+  // Imperative handles: a panel group cannot take its layout as a prop, so the
+  // saved numbers are applied once the profile has loaded.
+  const colsGroup = useRef<ImperativePanelGroupHandle>(null);
+  const mainGroup = useRef<ImperativePanelGroupHandle>(null);
+  /** Panel groups fire onLayout at mount; recording that would overwrite the
+   *  saved layout with the defaults before it has been applied. */
+  const sizesGate = useRef(false);
+  /** True once the window profile has been read, so the panels can take its layout. */
+  const [profileLoaded, setProfileLoaded] = useState(false);
+
+  // Panels register with their group only after mounting, so a saved layout has
+  // to be pushed once the group is ready — and retried, because the first frame
+  // after a mount is often too early for the library to accept it.
+  useEffect(() => {
+    if (!profileLoaded) return undefined;
+    let tries = 0;
+    let timer = 0;
+    const push = () => {
+      const apply = (group: typeof colsGroup, layout?: number[], expected?: number) => {
+        if (!layout || !expected || layout.length !== expected) return true;
+        try {
+          const handle = group.current;
+          if (!handle) return false;
+          handle.setLayout(layout);
+          return true;
+        } catch {
+          // Layout rejected (pane count changed, or a value outside min/max).
+          return false;
+        }
+      };
+      const okCols = apply(colsGroup, sizes.cols, padMode ? 2 : 3);
+      const okMain = apply(mainGroup, sizes.main, termOpen ? 2 : 1);
+      tries += 1;
+      if ((okCols && okMain) || tries > 20) {
+        sizesGate.current = true;
+        return;
+      }
+      timer = window.setTimeout(push, 50);
+    };
+    push();
+    return () => window.clearTimeout(timer);
+  }, [profileLoaded, sizes, padMode, termOpen]);
+  const focusedPaneRef = useRef(focusedPane);
+  focusedPaneRef.current = focusedPane;
+
+  /**
+   * The file the reader is working in: the right pane when it has focus, else
+   * the left one.
+   *
+   * Shortcuts used to read activePathRef directly, so Ctrl+S in the right pane
+   * saved the left pane's file — or a folder, which silently did nothing.
+   */
+  const focusedPath = () =>
+    splitPathRef.current && focusedPaneRef.current === 'right'
+      ? splitPathRef.current
+      : activePathRef.current;
   sideTabRef.current = sideTab;
   const termOpenRef = useRef(termOpen);
   termOpenRef.current = termOpen;
@@ -205,6 +290,13 @@ export function App() {
           setTreeRoot(tree);
           setSelected(session?.selected || tree);
           setSideTab(session?.sideTab === 'repos' ? 'repos' : 'favorites');
+          setSplitPath(typeof session?.splitPath === 'string' ? session.splitPath : null);
+          const saved = session?.sizes;
+          setSizes(saved && typeof saved === 'object' ? saved : {});
+          if (typeof saved?.splitRatio === 'number') setSplitRatio(saved.splitRatio);
+          profileLoadedRef.current = true;
+          setProfileLoaded(true);
+          setFocusedPane('left');
           setTermOpen(session?.termOpen ?? true);
           const expandedDirs = session?.expanded?.length ? session.expanded : [tree];
           setExpanded(new Set(expandedDirs));
@@ -236,7 +328,28 @@ export function App() {
     activePath,
     sideTab,
     termOpen,
-  }), [repoPath, treeRoot, selected, expanded, tabs, activePath, sideTab, termOpen]);
+  }), [repoPath, treeRoot, selected, expanded, tabs, activePath, splitPath, sizes, sideTab, termOpen]);
+
+  /**
+   * A pane may only show a file that is actually open, or nothing at all.
+   *
+   * Every other path into a stale pane — an agent change that closes a review
+   * tab, a tab closed from its own ×, a restored profile whose file is gone —
+   * lands here instead of rendering an empty editor.
+   */
+  useEffect(() => {
+    const open = new Set(tabs.map((tab) => tab.path));
+    const leftOk = activePath === null || open.has(activePath);
+    const rightOk = splitPath === null || open.has(splitPath);
+    if (leftOk && rightOk) return;
+    // Prefer a file the other pane is not already showing: two panes on one file
+    // reads like a bug even when it is legal.
+    const spare = (taken: string | null) => tabs.find((tab) => tab.path !== taken)?.path
+      ?? tabs[tabs.length - 1]?.path
+      ?? null;
+    if (!leftOk) setActivePath(spare(splitPath));
+    if (!rightOk) setSplitPath(splitPath === null ? null : spare(activePath));
+  }, [tabs, activePath, splitPath]);
 
   const putSession = (keepalive = false) => {
     if (padMode) return;
@@ -249,6 +362,12 @@ export function App() {
         .filter((tab) => tab.kind !== 'diff' && !tab.agentPath && !tab.temp)
         .map((tab) => ({ path: tab.path, viewMode: tab.viewMode, folder: tab.kind === 'folder' })),
       activePath: activePathRef.current,
+      splitPath: splitPathRef.current,
+      // Absent until the profile has loaded: an early save would otherwise
+      // overwrite the stored layout with defaults.
+      ...(profileLoadedRef.current
+        ? { sizes: { ...sizesRef.current, splitRatio: splitRatioRef.current } }
+        : {}),
       sideTab: sideTabRef.current,
       termOpen: termOpenRef.current,
       rightTab: 'agent' as const,
@@ -621,12 +740,20 @@ export function App() {
       await toggleDir(entry.path);
       return;
     }
-    const keep = !opts?.temp;
+    // A click in the right pane is a deliberate placement, so it is never a
+    // preview tab — previews get evicted by the next click, which is what made
+    // the right pane jump to an unrelated old file.
+    const intoSplit = Boolean(splitPathRef.current) && focusedPaneRef.current === 'right';
+    const keep = !opts?.temp || intoSplit;
+    // A click belongs to the pane the reader is in. Focus is only ever moved by
+    // clicking inside a pane, so opening the split no longer steals the next
+    // tree click to the right-hand side.
     const existing = tabsRef.current.find((tab) => tab.path === entry.path);
     if (existing && opts?.reload && !mayReload(existing)) {
       // A watcher event or a terminal "open" must not replace text the reader is
       // still editing; it would also drop the caret at the end of the file.
-      setActivePath(entry.path);
+      if (intoSplit) setSplitPath(entry.path);
+      else setActivePath(entry.path);
       showToast(`${entry.name} changed on disk — unsaved edits kept`);
       return;
     }
@@ -634,7 +761,8 @@ export function App() {
       if (keep && existing.temp) {
         setTabs((prev) => prev.map((tab) => tab.path === entry.path ? { ...tab, temp: false } : tab));
       }
-      setActivePath(entry.path);
+      if (intoSplit) setSplitPath(entry.path);
+      else setActivePath(entry.path);
       return;
     }
     const kind = viewerKind(entry.path, moduleEnabledRef.current);
@@ -653,7 +781,10 @@ export function App() {
       };
       setTabs((prev) => {
         if (!keep) {
-          const rest = prev.filter((item) => !item.temp);
+          // A preview tab is replaced by the next preview. A file a pane is
+          // showing is not a preview any more, whatever opened it.
+          const pinned = new Set([activePathRef.current, splitPathRef.current]);
+          const rest = prev.filter((item) => !item.temp || (item.path && pinned.has(item.path)));
           return [tab, ...rest];
         }
         return [tab, ...prev];
@@ -663,7 +794,8 @@ export function App() {
         ? { ...tab, loading: true, error: undefined, temp: keep ? false : tab.temp }
         : tab));
     }
-    setActivePath(entry.path);
+    if (intoSplit) setSplitPath(entry.path);
+    else setActivePath(entry.path);
     try {
       if (kind === 'image' || kind === 'html') {
         setTabs((prev) => prev.map((item) => item.path === entry.path ? {
@@ -700,17 +832,29 @@ export function App() {
     await loadDir(dir);
     const name = basename(dir) || '/';
     const current = tabsRef.current;
+    // A folder belongs to the pane the reader is in, exactly like a file. Loading
+    // it into the left pane while they were working on the right made the address
+    // bar feel like it went to the wrong place.
+    const intoSplit = Boolean(splitPathRef.current) && focusedPaneRef.current === 'right';
+    const show = (path: string) => {
+      if (intoSplit) setSplitPath(path);
+      else setActivePath(path);
+    };
     const same = current.find((tab) => tab.kind === 'folder' && tab.path === dir);
     if (same) {
-      setActivePath(dir);
+      show(dir);
       return;
     }
+    // Never repoint a folder tab the other pane is showing: that would drag the
+    // left pane to the new directory. Reuse only when the tab is free.
+    const inUse = new Set([activePathRef.current, splitPathRef.current]);
     const reuse = opts?.newTab
       ? undefined
       : (
         (opts?.from ? current.find((tab) => tab.kind === 'folder' && tab.path === opts.from) : undefined)
         || current.find((tab) => tab.kind === 'folder' && tab.path === activePathRef.current)
-        || current.find((tab) => tab.kind === 'folder')
+        || current.find((tab) => tab.kind === 'folder' && !(intoSplit && inUse.has(tab.path)))
+        || (intoSplit ? undefined : current.find((tab) => tab.kind === 'folder'))
       );
     const mode = opts?.viewMode === 'details' || opts?.viewMode === 'icons'
       ? opts.viewMode
@@ -719,7 +863,7 @@ export function App() {
       setTabs((prev) => prev.map((tab) => tab.kind === 'folder' && tab.path === reuse.path
         ? { ...tab, path: dir, name, viewMode: mode }
         : tab));
-      setActivePath(dir);
+      show(dir);
       return;
     }
     setTabs((prev) => [{
@@ -733,7 +877,7 @@ export function App() {
       loading: false,
       kind: 'folder',
     }, ...prev]);
-    setActivePath(dir);
+    show(dir);
   };
 
   const navigateFolder = (from: string, to: string) => {
@@ -808,7 +952,8 @@ export function App() {
     const onKey = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
         e.preventDefault();
-        if (activePathRef.current) void save(activePathRef.current);
+        const path = focusedPath();
+        if (path) void save(path);
       }
       if ((e.ctrlKey || e.metaKey) && e.key === '`') {
         if (padMode) return;
@@ -818,7 +963,7 @@ export function App() {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'l') {
         e.preventDefault();
         e.stopPropagation();
-        const path = activePathRef.current;
+        const path = focusedPath();
         const tab = path ? tabsRef.current.find((item) => item.path === path) : undefined;
         if (!tab || !hasRenderedView(tab.kind)) return;
         applyViewMode(path!, tab.viewMode === 'source' ? 'rendered' : 'source');
@@ -846,10 +991,10 @@ export function App() {
 
   const runInTerminal = (text: string) => {
     if (!text) return;
-    const payload = prepareRunText(text, activePathRef.current);
+    const payload = prepareRunText(text, focusedPath());
     if (!payload) return;
     setTermOpen(true);
-    const hint = activePathRef.current || selectedRef.current || treeRootRef.current;
+    const hint = focusedPath() || selectedRef.current || treeRootRef.current;
     const repo = matchRepo(hint, reposRef.current);
     const setup = startupText(repo);
     const id = activeTermRef.current;
@@ -1361,15 +1506,100 @@ export function App() {
 
   const closeTabs = (paths: string[], keepPath: string | null) => {
     const closing = new Set(paths);
-    setTabs((prev) => {
-      const rest = prev.filter((tab) => !closing.has(tab.path));
-      const keep = keepPath && rest.some((tab) => tab.path === keepPath)
-        ? keepPath
-        : rest[rest.length - 1]?.path || null;
-      if (activePathRef.current !== keep) setActivePath(keep);
-      return rest;
-    });
+    const pick = (rest: OpenTab[], preferred: string | null) => (preferred && rest.some((tab) => tab.path === preferred)
+      ? preferred
+      : rest[rest.length - 1]?.path || null);
+    // Read the panes before the state update: the replacer below runs later, and
+    // by then the refs are already new.
+    const previousLeft = activePathRef.current;
+    const previousRight = splitPathRef.current;
+    const next = tabsRef.current.filter((tab) => !closing.has(tab.path));
+    // Both panes are repaired here. Closing a tab used to leave the right pane
+    // pointing at a file that no longer existed, which rendered as an empty pane.
+    const keptLeft = pick(next, keepPath ?? previousLeft);
+    const keptRight = previousRight && !closing.has(previousRight)
+      ? previousRight
+      : pick(next, next.find((tab) => tab.path !== keptLeft)?.path || null);
+    if (keptLeft !== previousLeft) setActivePath(keptLeft);
+    if (keptRight !== previousRight) setSplitPath(keptRight);
+    setTabs((prev) => prev.filter((tab) => !closing.has(tab.path)));
   };
+
+  /** The editor renders twice when split: one element, two active files.
+   *  Both panes therefore share tabs, dirty state and disk reloads, which is
+   *  what splitting an editor has to mean. */
+  const renderEditor = (over: Partial<Parameters<typeof EditorArea>[0]> = {}) => (
+    <EditorArea
+      tabs={tabs}
+      activePath={activePath}
+      onSelect={setActivePath}
+      onCloseMany={closeTabs}
+      onClose={(path) => {
+        setTabs((prev) => {
+          const rest = prev.filter((tab) => tab.path !== path);
+          if (activePathRef.current === path) {
+            setActivePath(rest[rest.length - 1]?.path || null);
+          }
+          return rest;
+        });
+      }}
+      onChange={(path, content) => {
+        const reviewTab = tabsRef.current.find((tab) => tab.path === path && tab.agentPath);
+        if (reviewTab && !reviewEditedSent.current.has(path)) {
+          // Told once per file: the record says "you edited it", and
+          // repeating it every keystroke would bury the real signal.
+          reviewEditedSent.current.add(path);
+          sendAgent({ type: 'review_edited', path });
+        }
+        setTabs((prev) => prev.map((tab) => tab.path === path ? {
+          ...tab,
+          content,
+          // Editing an agent review keeps the green side in step with
+          // the text, so the diff shows the edit rather than the
+          // agent's original proposal.
+          after: tab.agentPath ? content : tab.after,
+          dirty: content !== tab.savedContent,
+          temp: tab.temp && content === tab.savedContent,
+        } : tab));
+      }}
+      onSave={(path) => void save(path)}
+      onRevert={(path) => void revertFile(path)}
+      canRevert={(path) => Boolean(git?.files.some((item) => item.path === path))}
+      onKeepTab={(path) => {
+        setTabs((prev) => prev.map((tab) => tab.path === path ? { ...tab, temp: false } : tab));
+        setActivePath(path);
+      }}
+      onRunInTerminal={runInTerminal}
+      onRevealInTree={(path) => void revealInTree(path)}
+      onAcceptChange={(path) => sendAgent({ type: 'accept', path })}
+      onUndoChange={(path) => sendAgent({ type: 'undo', path })}
+      onToggleView={applyViewMode}
+      listings={listings}
+      favorites={favorites}
+      repos={repos}
+      onOpenFile={(entry) => void openFile(entry)}
+      onOpenFolder={navigateFolder}
+      onOpenFolderNew={(path) => void openFolder(path, { newTab: true })}
+      onCreate={(dir, kind, name) => void createNode(dir, kind, name)}
+      onRename={(from, name) => void renameNode(from, name)}
+      onDelete={(entry) => void deleteNode(entry)}
+      onDeleteMany={(entries) => void deleteMany(entries)}
+      onTerminal={openTerminalHere}
+      onPin={(path) => void pinFolder(path)}
+      onUnpin={(path) => void unpinFolder(path)}
+      onAddRepo={(path) => void addRepo(path)}
+      onRemoveRepo={(path) => void removeRepo(path)}
+      onCopyFiles={copyFiles}
+      onPasteFiles={(into) => void pasteFiles(into)}
+      onLoadDir={loadDir}
+      onHunkDecision={(path, id, decision) => sendAgent({ type: 'hunk', path, id, decision })}
+      onOpenPath={(path) => {
+        const tab = tabsRef.current.find((item) => item.path === path);
+        if (tab) setTabs((prev) => prev.map((item) => item.path === path ? { ...item, agentPath: undefined } : item));
+      }}
+      {...over}
+    />
+  );
 
   return (
     <div className="app">
@@ -1377,16 +1607,18 @@ export function App() {
         <button
           type="button"
           className="brand"
-          onClick={() => { setVersionOpen((v) => !v); setHostOpen(false); setBrandMenu(null); }}
-          onContextMenu={(e) => {
-            e.preventDefault();
-            setVersionOpen(false);
+          onClick={() => {
             setHostOpen(false);
-            setBrandMenu({ x: e.clientX, y: e.clientY });
+            setVersionOpen((v) => !v);
           }}
-          title="Click: version · Right-click: windows"
+          title="Version, channels and windows"
         >
-          <span className="brand-mark" /> RemotePad
+          <span className="brand-mark" />
+          <span className="brand-name">RemotePad</span>
+          <span className="brand-version">{meta.version ? `v${meta.version}` : ''}</span>
+          <span className="brand-channel">
+            {meta.channel || 'local'}{meta.head ? `@${meta.head.slice(0, 7)}` : ''}
+          </span>
         </button>
         <UpdateButton onToast={showToast} />
         <div
@@ -1454,8 +1686,15 @@ export function App() {
         )}
       </header>
       <div className="shell">
-        <PanelGroup direction="horizontal">
-          <Panel defaultSize={14} minSize={14}>
+        <PanelGroup
+          direction="horizontal"
+          ref={colsGroup}
+          onLayout={(layout) => {
+            if (!sizesGate.current) return;
+            setSizes((prev) => ({ ...prev, cols: layout }));
+          }}
+        >
+          <Panel defaultSize={14} minSize={7}>
             <LeftSidebar
               roots={[treeRoot]}
               treeRoot={treeRoot}
@@ -1503,79 +1742,130 @@ export function App() {
             />
           </Panel>
           <PanelResizeHandle className="resize-handle" />
-          <Panel>
+          <Panel minSize={20}>
             <div className="main-col">
-            <PanelGroup direction="vertical" className="main-split">
+            <PanelGroup
+              direction="vertical"
+              className="main-split"
+              ref={mainGroup}
+              onLayout={(layout) => {
+                if (!sizesGate.current) return;
+                setSizes((prev) => ({ ...prev, main: layout }));
+              }}
+            >
               <Panel>
-                <EditorArea
-                  tabs={tabs}
-                  activePath={activePath}
-                  onSelect={setActivePath}
-                  onCloseMany={closeTabs}
-                  onClose={(path) => {
-                    setTabs((prev) => {
-                      const rest = prev.filter((tab) => tab.path !== path);
-                      if (activePathRef.current === path) {
-                        setActivePath(rest[rest.length - 1]?.path || null);
+                <div className={`editor-split${splitPath ? ' split' : ''}`}>
+                  <div
+                    className={`editor-pane${focusedPane === 'left' ? ' focused' : ''}`}
+                    style={splitPath ? { flex: `0 0 ${(splitRatio * 100).toFixed(2)}%` } : undefined}
+                    onMouseDownCapture={() => setFocusedPane('left')}
+                    onDragOver={(e) => {
+                      if (hasEntryDrag(e)) e.preventDefault();
+                    }}
+                    onDrop={(e) => {
+                      const entry = readEntryDrag(e);
+                      if (!entry || entry.kind !== 'file') return;
+                      e.preventDefault();
+                      // Mirror of the right pane: swap in another tab rather than
+                      // closing the split or leaving the other side empty.
+                      if (splitPathRef.current === entry.path) {
+                        const next = tabsRef.current.find((tab) => tab.path !== entry.path);
+                        setSplitPath(next?.path || null);
                       }
-                      return rest;
-                    });
-                  }}
-                  onChange={(path, content) => {
-                    const reviewTab = tabsRef.current.find((tab) => tab.path === path && tab.agentPath);
-                    if (reviewTab && !reviewEditedSent.current.has(path)) {
-                      // Told once per file: the record says "you edited it", and
-                      // repeating it every keystroke would bury the real signal.
-                      reviewEditedSent.current.add(path);
-                      sendAgent({ type: 'review_edited', path });
-                    }
-                    setTabs((prev) => prev.map((tab) => tab.path === path ? {
-                      ...tab,
-                      content,
-                      // Editing an agent review keeps the green side in step with
-                      // the text, so the diff shows the edit rather than the
-                      // agent's original proposal.
-                      after: tab.agentPath ? content : tab.after,
-                      dirty: content !== tab.savedContent,
-                      temp: tab.temp && content === tab.savedContent,
-                    } : tab));
-                  }}
-                  onSave={(path) => void save(path)}
-                  onRevert={(path) => void revertFile(path)}
-                  canRevert={(path) => Boolean(git?.files.some((item) => item.path === path))}
-                  onKeepTab={(path) => {
-                    setTabs((prev) => prev.map((tab) => tab.path === path ? { ...tab, temp: false } : tab));
-                    setActivePath(path);
-                  }}
-                  onRunInTerminal={runInTerminal}
-                  onRevealInTree={(path) => void revealInTree(path)}
-                  onAcceptChange={(path) => sendAgent({ type: 'accept', path })}
-                  onUndoChange={(path) => sendAgent({ type: 'undo', path })}
-                  onToggleView={applyViewMode}
-                  listings={listings}
-                  favorites={favorites}
-                  repos={repos}
-                  onOpenFile={(entry) => void openFile(entry)}
-                  onOpenFolder={navigateFolder}
-                  onOpenFolderNew={(path) => void openFolder(path, { newTab: true })}
-                  onCreate={(dir, kind, name) => void createNode(dir, kind, name)}
-                  onRename={(from, name) => void renameNode(from, name)}
-                  onDelete={(entry) => void deleteNode(entry)}
-                  onDeleteMany={(entries) => void deleteMany(entries)}
-                  onTerminal={openTerminalHere}
-                  onPin={(path) => void pinFolder(path)}
-                  onUnpin={(path) => void unpinFolder(path)}
-                  onAddRepo={(path) => void addRepo(path)}
-                  onRemoveRepo={(path) => void removeRepo(path)}
-                  onCopyFiles={copyFiles}
-                  onPasteFiles={(into) => void pasteFiles(into)}
-                  onLoadDir={loadDir}
-                  onHunkDecision={(path, id, decision) => sendAgent({ type: 'hunk', path, id, decision })}
-                  onOpenPath={(path) => {
-                    const tab = tabsRef.current.find((item) => item.path === path);
-                    if (tab) setTabs((prev) => prev.map((item) => item.path === path ? { ...item, agentPath: undefined } : item));
-                  }}
-                />
+                      setActivePath(entry.path);
+                      setFocusedPane('left');
+                    }}
+                  >
+                    {renderEditor({
+                      showActions: !splitPath,
+                      splitOpen: Boolean(splitPath),
+                      onToggleSplit: () => {
+                        if (splitPath) {
+                          setSplitPath(null);
+                          setFocusedPane('left');
+                          return;
+                        }
+                        // Fill the new pane with a different tab so the split is
+                        // useful at once, and leave the focus where the reader
+                        // left it: they have not clicked into the right pane yet.
+                        const current = activePathRef.current;
+                        const other = tabsRef.current.find((tab) => tab.path !== current);
+                        const target = other?.path || current;
+                        if (!target) return;
+                        setSplitPath(target);
+                      },
+                    })}
+                  </div>
+                  {splitPath && (
+                    <div
+                      className="editor-divider"
+                      role="separator"
+                      aria-orientation="vertical"
+                      title="Drag to resize · double-click for 50/50"
+                      onPointerDown={(e) => {
+                        const container = e.currentTarget.parentElement;
+                        if (!container) return;
+                        e.preventDefault();
+                        (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
+                        const box = container.getBoundingClientRect();
+                        const move = (ev: PointerEvent) => {
+                          const ratio = Math.min(0.85, Math.max(0.15, (ev.clientX - box.left) / box.width));
+                          splitRatioRef.current = ratio;
+                          setSplitRatio(ratio);
+                        };
+                        const stop = () => {
+                          window.removeEventListener('pointermove', move);
+                          window.removeEventListener('pointerup', stop);
+                          // One save per drag, not one per pixel.
+                          putSession(false);
+                        };
+                        window.addEventListener('pointermove', move);
+                        window.addEventListener('pointerup', stop);
+                      }}
+                      onDoubleClick={() => {
+                        splitRatioRef.current = 0.5;
+                        setSplitRatio(0.5);
+                        putSession(false);
+                      }}
+                    />
+                  )}
+                  {splitPath && (
+                    <div
+                      className={`editor-pane secondary${focusedPane === 'right' ? ' focused' : ''}`}
+                      onMouseDownCapture={() => setFocusedPane('right')}
+                      // Drag a tab or a tree file here and it opens in this pane,
+                      // the way a split works in Cursor: the tab moves, it does
+                      // not get duplicated on the other side.
+                      onDragOver={(e) => {
+                        if (hasEntryDrag(e)) e.preventDefault();
+                      }}
+                      onDrop={(e) => {
+                        const entry = readEntryDrag(e);
+                        if (!entry || entry.kind !== 'file') return;
+                        e.preventDefault();
+                        // A move, not a copy: hand the left pane something else so
+                        // the same file is not shown twice. With nothing else open
+                        // the left keeps it — two panes on one file beats a blank.
+                        if (activePathRef.current === entry.path) {
+                          const next = tabsRef.current.find((tab) => tab.path !== entry.path);
+                          if (next) setActivePath(next.path);
+                        }
+                        setSplitPath(entry.path);
+                        setFocusedPane('right');
+                      }}
+                    >
+                      {renderEditor({
+                        activePath: splitPath,
+                        onSelect: setSplitPath,
+                        hideChrome: true,
+                        onCloseSplit: () => {
+                          setSplitPath(null);
+                          setFocusedPane('left');
+                        },
+                      })}
+                    </div>
+                  )}
+                </div>
               </Panel>
               {termOpen && (
                 <>
@@ -1600,7 +1890,7 @@ export function App() {
           </Panel>
           {!padMode && <PanelResizeHandle className="resize-handle" />}
           {!padMode && (
-          <Panel defaultSize={34} minSize={22} maxSize={72}>
+          <Panel defaultSize={34} minSize={12} maxSize={72}>
             <RightDock
               cwd={agentWorkingCwd || agentCwd}
               error={agentError}
@@ -1703,38 +1993,10 @@ export function App() {
           )}
         </PanelGroup>
       </div>
-      {brandMenu && (
-        <ActionMenu
-          x={brandMenu.x}
-          y={brandMenu.y}
-          items={[
-            { type: 'item', id: 'new-window', label: 'Open new window', hint: 'another repo' },
-            { type: 'item', id: 'copy-window', label: 'Copy link to this window' },
-            { type: 'item', id: 'default-window', label: 'Open the default window' },
-          ]}
-          onAction={(id) => {
-            setBrandMenu(null);
-            if (id === 'new-window') {
-              window.open(windowUrl(newWindowId()), '_blank', 'noopener');
-              return;
-            }
-            if (id === 'default-window') {
-              window.open(windowUrl('default'), '_blank', 'noopener');
-              return;
-            }
-            if (id === 'copy-window') {
-              const url = windowUrl(win);
-              void navigator.clipboard?.writeText(url).catch(() => undefined);
-              showToast(`Copied ${url}`);
-            }
-          }}
-          onClose={() => setBrandMenu(null)}
-        />
-      )}
       {versionOpen && (
         <>
           <div className="float-mask" onClick={() => setVersionOpen(false)} />
-          <VersionPop onClose={() => setVersionOpen(false)} />
+          <VersionPop onClose={() => setVersionOpen(false)} currentWindow={win} />
         </>
       )}
       {hostOpen && (

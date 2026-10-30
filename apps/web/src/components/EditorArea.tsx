@@ -81,6 +81,11 @@ export function EditorArea({
   onHunkDecision,
   onOpenPath,
   onLoadDir,
+  splitOpen,
+  onToggleSplit,
+  hideChrome,
+  onCloseSplit,
+  showActions = true,
 }: {
   tabs: OpenTab[];
   activePath: string | null;
@@ -119,12 +124,43 @@ export function EditorArea({
   onHunkDecision?: (path: string, id: string, decision: 'keep' | 'ignore') => void;
   /** Open the reviewed file as a normal editor tab. */
   onOpenPath?: (path: string) => void;
+  /** A second pane is showing: the toggle offers to close it. */
+  splitOpen?: boolean;
+  onToggleSplit?: () => void;
+  /** Second pane: no tab strip, just the file and its own close. */
+  hideChrome?: boolean;
+  onCloseSplit?: () => void;
+  /** The editor controls live once, in the right-most pane: after a split the
+   *  left pane's bar ends mid-window, so pinning them there put them in the
+   *  middle of the screen. */
+  showActions?: boolean;
 }) {
   const tab = tabs.find((item) => item.path === activePath) || null;
+
   const [tabMenu, setTabMenu] = useState<{ x: number; y: number; index: number } | null>(null);
   const [edMenu, setEdMenu] = useState<{ x: number; y: number } | null>(null);
   const [filesOpen, setFilesOpen] = useState(false);
   const [overflowing, setOverflowing] = useState(false);
+  /** Split + Files, icon-only and always at the right edge of the editor. */
+  const paneActions = (
+    <>
+      <button
+        type="button"
+        className={`ghost split-toggle ${splitOpen ? 'on' : ''}`}
+        onClick={onToggleSplit}
+        title={splitOpen ? 'Close the second editor' : 'Split the editor in two'}
+        aria-label={splitOpen ? 'Close the second editor' : 'Split the editor in two'}
+      >◫</button>
+      <button
+        type="button"
+        className={`ghost files-toggle ${filesOpen ? 'on' : ''}`}
+        onClick={() => setFilesOpen((v) => !v)}
+        title={filesOpen ? 'Hide open files' : 'Show open files'}
+        aria-label={filesOpen ? 'Hide open files' : 'Show open files'}
+      >▤</button>
+    </>
+  );
+
   const tabsRef = useRef<HTMLDivElement>(null);
   const measureRef = useRef<HTMLDivElement>(null);
   const edRef = useRef<Parameters<OnMount>[0] | null>(null);
@@ -218,6 +254,47 @@ export function EditorArea({
 
   return (
     <div className="pane">
+      {hideChrome && (
+        <div className="tabs-bar split-head">
+          <div className="tabs">
+            <div
+              className={`tab active ${tab?.dirty ? 'unsaved' : ''}`}
+              title={tab?.path || ''}
+              // Draggable like a normal tab, so the two panes behave the same:
+              // drag it to the other pane to move it there, or into a folder.
+              draggable={Boolean(tab) && tab!.kind !== 'diff' && !tab!.agentPath}
+              onDragStart={(e) => {
+                if (!tab || tab.kind === 'diff' || tab.agentPath) return;
+                setEntryDrag(e, {
+                  path: tab.path,
+                  kind: tab.kind === 'folder' ? 'dir' : 'file',
+                  name: tab.name,
+                });
+              }}
+              // Same menu as a tab in the left pane. Without it the second editor
+              // had no way to save, revert, reveal or close from the mouse.
+              onContextMenu={(e) => {
+                e.preventDefault();
+                if (!tab) return;
+                const index = tabs.findIndex((item) => item.path === tab.path);
+                if (index >= 0) setTabMenu({ x: e.clientX, y: e.clientY, index });
+              }}
+            >
+              <span className={tab?.dirty ? 'dirty' : ''}>
+                {tab ? `${tab.dirty ? '● ' : ''}${tab.name}` : 'No file'}
+              </span>
+              <button
+                className="ghost close"
+                title="Close the second editor"
+                aria-label="Close the second editor"
+                onClick={onCloseSplit}
+              >×</button>
+            </div>
+          </div>
+          {showActions && paneActions}
+        </div>
+      )}
+      {!hideChrome && (
       <div className="tabs-bar">
         <div className="tabs" ref={tabsRef}>
           {tabs.map((item, idx) => (
@@ -246,12 +323,9 @@ export function EditorArea({
             </div>
           ))}
         </div>
-        <button
-          className={`ghost files-toggle ${filesOpen ? 'on' : ''}`}
-          onClick={() => setFilesOpen((v) => !v)}
-          title={filesOpen ? 'Hide open files' : 'Show open files'}
-        >Files</button>
+        {showActions && paneActions}
       </div>
+      )}
       <div ref={measureRef} className="tabs-measure" aria-hidden="true">
         {tabs.map((item) => (
           <div key={item.path} className="tab"><span>{item.name}</span></div>

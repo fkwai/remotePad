@@ -5,8 +5,10 @@ import path from 'node:path';
 import type { Repo } from '@remotepad/shared';
 import { PathError, resolveSafe } from './paths.ts';
 import { findRepoRoot, readRepoHead } from './git.ts';
+import { sharedStateFile } from './state-paths.ts';
 
-export const CONTROL_PATH = path.join(os.homedir(), '.remotepad', 'workspaces.json');
+// Same file as the live instance: the repo list is the user's.
+export const CONTROL_PATH = sharedStateFile('workspaces.json');
 
 interface Stored {
   path: string;

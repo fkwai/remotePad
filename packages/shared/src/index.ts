@@ -84,6 +84,40 @@ export interface SessionTab {
   folder?: boolean;
 }
 
+/**
+ * Pane geometry, stored with the window's profile.
+ *
+ * These lived in localStorage, which is per browser: the same window restored
+ * to a different size on every machine, and clearing site data lost the layout
+ * while the rest of the profile survived.
+ */
+export interface SessionSizes {
+  /** Left editor pane share of the split, 0..1. */
+  splitRatio?: number;
+  /** Column percentages: sidebar | main | right dock. */
+  cols?: number[];
+  /** Vertical split inside the main column: editor | terminal. */
+  main?: number[];
+}
+
+/** A lane (dev / nightly) running beside this install on its own port. */
+export interface LaneInfo {
+  name: string;
+  branch: string;
+  alive: boolean;
+  uiPort?: number;
+  apiPort?: number;
+}
+
+/** One window (`?w=`) as listed in the profile menu. */
+export interface WindowInfo {
+  id: string;
+  /** Repo name when the window is in one; otherwise its folder; else "empty". */
+  label: string;
+  path: string | null;
+  updatedAt: number;
+}
+
 export interface SessionState {
   repoPath: string | null;
   treeRoot: string;
@@ -91,9 +125,12 @@ export interface SessionState {
   expanded: string[];
   tabs: SessionTab[];
   activePath: string | null;
+  /** Second editor pane; null keeps the editor single. */
+  splitPath?: string | null;
   sideTab: 'favorites' | 'repos';
   termOpen: boolean;
   rightTab: 'agent' | 'machine';
+  sizes?: SessionSizes;
 }
 
 export interface SearchHit {
