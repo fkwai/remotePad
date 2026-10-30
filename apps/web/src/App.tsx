@@ -1616,9 +1616,6 @@ export function App() {
           <span className="brand-mark" />
           <span className="brand-name">RemotePad</span>
           <span className="brand-version">{meta.version ? `v${meta.version}` : ''}</span>
-          <span className="brand-channel">
-            {meta.channel || 'local'}{meta.head ? `@${meta.head.slice(0, 7)}` : ''}
-          </span>
         </button>
         <UpdateButton onToast={showToast} />
         <div
@@ -1642,7 +1639,20 @@ export function App() {
             window.open(browserPadUrl(entry.path), '_blank', 'noopener,noreferrer');
           }}
         >
-          {activeRepo && <span className="ws-chip">{activeRepo.name}</span>}
+          {activeRepo && (
+            <button
+              type="button"
+              className="ws-chip"
+              title={`Open ${activeRepo.path} — same as clicking it in REPOS`}
+              onClick={() => {
+                // Identical to a REPOS row: make it the repo, show that tab, and
+                // point the tree at it.
+                setRepoPath(activeRepo.path);
+                setSideTab('repos');
+                void revealDir(activeRepo.path);
+              }}
+            >{activeRepo.name}</button>
+          )}
           <input
             ref={addressRef}
             className="path-input"

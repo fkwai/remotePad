@@ -203,7 +203,13 @@ input:focus { border-color: #4a7f73; }
   font-family: var(--font);
   font-weight: 650;
   flex: 0 0 auto;
+  /* A repo name is a link to that repo, so it has to look and behave like one. */
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
 }
+.ws-chip:hover { text-decoration: underline; }
 .ws-chip::after {
   content: "·";
   color: var(--faint);
