@@ -148,7 +148,10 @@ case "$ACTION" in
     NAME="${2:?usage: $0 sync <feature>}"
     WT="$(wt_path_for "$NAME")"
     stop_one "$NAME" >/dev/null 2>&1 || true
-    if [ -d "$WT" ]; then
+    if [ "$NAME" = nightly ]; then
+      # Nightly is a mirror, so it is reset onto dev rather than pulled.
+      "$ROOT/scripts/nightly-sync.sh" || echo "nightly sync failed — starting what is checked out" >&2
+    elif [ -d "$WT" ]; then
       echo "updating $WT"
       git -C "$WT" pull -q --ff-only || { echo "pull failed — resolve it in $WT" >&2; exit 1; }
       git -C "$WT" log --oneline -1
@@ -208,6 +211,13 @@ mkdir -p "$PID_DIR"
 if curl -s -o /dev/null --max-time 2 "http://127.0.0.1:$UI/"; then
   echo "preview '$NAME' is already serving: http://127.0.0.1:$UI/"
   exit 0
+fi
+
+# Nightly follows dev, and opening it is the moment it catches up: this box has no
+# cron or systemd, so there is no midnight job to depend on. A failed sync leaves
+# the branch where it was and the lane starts on what is checked out.
+if [ "$NAME" = nightly ] && [ -z "${REMOTEPAD_NO_LANE_SYNC:-}" ]; then
+  "$ROOT/scripts/nightly-sync.sh" || echo "nightly sync failed — starting what is checked out" >&2
 fi
 
 HOME_DIR="$HOME/.remotepad-preview/$NAME"

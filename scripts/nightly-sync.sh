@@ -1,25 +1,25 @@
 #!/usr/bin/env bash
-# Nightly lane: take whatever `dev` has, and run it.
+# Bring the nightly lane up to `dev`. Runs when the lane is opened, not on a clock.
 #
-#   scripts/nightly-sync.sh [--no-restart]
+#   scripts/nightly-sync.sh
 #
-# `dev` is the branch being worked on; `nightly` mirrors it with a version stamp,
-# so a nightly build never claims the release version it came from. Without this
-# the lane sits on whatever commit it was created from — which is why the nightly
-# channel never looked like a nightly.
+# `dev` is where work lands; `nightly` is a mirror of it carrying a stamp, so a
+# nightly build never claims the release version it was cut from. This box has no
+# cron and no systemd, so a midnight job would be a detached process that a reboot
+# quietly kills — and a lane restarted at 3am can leave a dead preview behind. The
+# sync therefore happens at the moment of use: `preview.sh nightly` calls this
+# before it starts anything.
 #
-# Everything that can fail happens before the running lane is touched, and a lane
-# that comes back broken is rolled back to the commit it served a moment ago: an
-# unattended job must not leave a dead preview behind in the morning.
+# Publishing `origin/nightly` is the GitHub Action's job (.github/workflows/
+# nightly.yml, 00:00 UTC); this only prepares the local lane.
+#
+# Everything that can fail happens before the branch moves, and a failed gate puts
+# the branch back where it was.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 WT="${REMOTEPAD_NIGHTLY_DIR:-/workspace/git/worktrees/remotepad-nightly}"
 BASE="${REMOTEPAD_NIGHTLY_BASE:-origin/dev}"
-API="${REMOTEPAD_NIGHTLY_API_PORT:-6121}"
-UI="${REMOTEPAD_NIGHTLY_UI_PORT:-6120}"
-RESTART=1
-[ "${1:-}" = "--no-restart" ] && RESTART=0
 
 STAMP="$(date +%Y%m%d)"
 say() { printf '[nightly-sync] %s\n' "$*"; }
@@ -27,7 +27,6 @@ say() { printf '[nightly-sync] %s\n' "$*"; }
 # A worktree has a `.git` file, not a directory, so ask git itself.
 git -C "$WT" rev-parse --git-dir >/dev/null 2>&1 || { say "no nightly worktree at $WT"; exit 1; }
 
-# Unattended: git needs an identity for the stamp commit.
 export GIT_AUTHOR_NAME="${GIT_AUTHOR_NAME:-nightly}"
 export GIT_AUTHOR_EMAIL="${GIT_AUTHOR_EMAIL:-nightly@remotePad.local}"
 export GIT_COMMITTER_NAME="${GIT_COMMITTER_NAME:-nightly}"
@@ -43,20 +42,19 @@ if [ "$BEFORE" = "$TARGET" ]; then
   exit 0
 fi
 
-# The stamp sits on top of the base, so a quiet night still shows a different
-# HEAD. Nothing to do when the version files are the only difference: restarting
-# a lane that already runs the same code is churn, not a nightly.
+# The stamp sits on top of the base, so a quiet day still shows a different HEAD.
+# Nothing to do when the version files are the only difference.
 if git -C "$WT" merge-base --is-ancestor "$TARGET" "$BEFORE" 2>/dev/null; then
   DRIFT="$(git -C "$WT" diff --name-only "$TARGET" "$BEFORE" \
     | grep -vE '^(package\.json|apps/(web|server)/package\.json|packages/shared/package\.json)$' || true)"
   if [ -z "$DRIFT" ]; then
-    say "$BASE unchanged since last night, nothing to do"
+    say "$BASE unchanged since last sync, nothing to do"
     exit 0
   fi
 fi
 
 rollback() {
-  say "rolling the branch back to $(git -C "$WT" rev-parse --short "$BEFORE")"
+  say "putting the branch back to $(git -C "$WT" rev-parse --short "$BEFORE")"
   git -C "$WT" reset --hard --quiet "$BEFORE"
 }
 
@@ -89,11 +87,11 @@ else
   say "version already $NIGHTLY_VERSION"
 fi
 
-# Gate before the lane is disturbed: the sources have to typecheck.
+# Gate before the lane starts on it: the sources have to typecheck.
 if ! (cd "$WT" \
       && ./apps/server/node_modules/.bin/tsc -p apps/server/tsconfig.json --noEmit \
       && ./apps/server/node_modules/.bin/tsc -b apps/web/tsconfig.json --pretty false); then
-  say "typecheck failed, lane untouched"
+  say "typecheck failed"
   rollback
   exit 1
 fi
@@ -109,37 +107,4 @@ if [ "$lock_before" != "$lock_after" ]; then
   }
 fi
 
-HEAD="$(git -C "$WT" rev-parse HEAD)"
-
-restart_lane() {
-  "$ROOT/scripts/preview.sh" stop nightly >/dev/null 2>&1 || true
-  "$ROOT/scripts/preview.sh" nightly >/dev/null 2>&1 || true
-}
-
-if [ "$RESTART" = 1 ]; then
-  say "restarting the nightly lane"
-  restart_lane
-  # The point of the exercise is a lane that answers. If it does not, the commit
-  # that was just synced is not one to leave running unattended.
-  ok=0
-  for _ in $(seq 1 40); do
-    if curl -s -o /dev/null --max-time 2 "http://127.0.0.1:$API/api/session" \
-       && curl -s -o /dev/null --max-time 2 "http://127.0.0.1:$UI/"; then ok=1; break; fi
-    sleep 3
-  done
-  if [ "$ok" != 1 ]; then
-    say "lane did not come back on $(git -C "$WT" rev-parse --short "$HEAD")"
-    rollback
-    restart_lane
-    exit 1
-  fi
-  say "lane is up on $(git -C "$WT" rev-parse --short "$HEAD")"
-fi
-
-# Publish only a lane known to run. `nightly` is a mirror, so the push is forced,
-# with a lease so a concurrent push is never silently overwritten.
-if git -C "$WT" push --quiet --force-with-lease origin "HEAD:refs/heads/nightly"; then
-  say "published $NIGHTLY_VERSION at $(git -C "$WT" rev-parse --short HEAD)"
-else
-  say "WARNING: lane is up but the push failed"
-fi
+say "ready on $(git -C "$WT" rev-parse --short HEAD) ($NIGHTLY_VERSION)"

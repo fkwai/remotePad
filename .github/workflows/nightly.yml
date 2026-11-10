@@ -1,0 +1,76 @@
+# Publish `nightly` as a mirror of `dev`, once a day.
+#
+# The box has no cron and no systemd, and a lane restarted at 3am can leave a dead
+# preview behind, so the schedule lives here instead: this workflow owns the
+# published branch, and the local nightly lane syncs itself when it is opened
+# (scripts/nightly-sync.sh, called from preview.sh). Nothing on the box has to stay
+# alive for a nightly to appear.
+#
+# A nightly never claims the release version it was cut from: the mirror carries
+# X.Y.Z-nightly.DATE, the same stamp the local lane uses.
+name: nightly
+
+on:
+  schedule:
+    - cron: '0 0 * * *' # 00:00 UTC daily
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: nightly
+  cancel-in-progress: false
+
+jobs:
+  mirror:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: dev
+          fetch-depth: 0
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.15.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      # The published branch is what "Update N" installs, so it does not ship
+      # untested sources.
+      - name: Typecheck
+        run: |
+          pnpm -C apps/server exec tsc -p tsconfig.json --noEmit
+          pnpm -C apps/web exec tsc -b tsconfig.json
+
+      - name: Stamp the nightly version
+        run: |
+          STAMP="$(date -u +%Y%m%d)"
+          VERSION="$(node -p "require('./package.json').version.split('-')[0]")-nightly.${STAMP}"
+          node - "$VERSION" <<'JS'
+          const fs = require('fs');
+          const version = process.argv[2];
+          for (const path of ['package.json', 'apps/web/package.json', 'apps/server/package.json', 'packages/shared/package.json']) {
+            const data = JSON.parse(fs.readFileSync(path, 'utf8'));
+            data.version = version;
+            fs.writeFileSync(path, JSON.stringify(data, null, 2) + '\n');
+          }
+          JS
+          git config user.name nightly
+          git config user.email nightly@remotePad.local
+          git add -A
+          # A second run on the same day has nothing to change; that is not a
+          # failure, the branch already carries today's stamp.
+          git diff --cached --quiet || git commit -m "nightly ${STAMP}" -m "from dev at ${GITHUB_SHA::7}"
+
+      # `nightly` is a mirror, never a place to commit: moving the branch is the
+      # whole job.
+      - name: Publish
+        run: git push --force origin HEAD:refs/heads/nightly
