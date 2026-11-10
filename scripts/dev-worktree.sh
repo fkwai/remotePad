@@ -24,7 +24,6 @@ if ! mkdir -p "$WT_ROOT" 2>/dev/null; then
   WT_ROOT="$ROOT/.worktrees"
 fi
 WT="$WT_ROOT/remotepad-$NAME"
-BRANCH="helper/$NAME"
 
 if [ -e "$WT" ]; then
   echo "worktree already exists: $WT" >&2
@@ -39,7 +38,15 @@ E2E_API=$(( 4800 + SEED ))
 E2E_UI=$(( 5100 + SEED ))
 
 mkdir -p "$WT_ROOT"
-git -C "$ROOT" worktree add -q "$WT" -b "$BRANCH" "$BASE"
+# A lane (dev, nightly, main) is a standing branch and runs on its own name; only
+# feature work gets a `helper/` branch, so `git branch` stays readable.
+if git -C "$ROOT" rev-parse --verify --quiet "refs/heads/$NAME" >/dev/null; then
+  BRANCH="$NAME"
+  git -C "$ROOT" worktree add -q "$WT" "$BRANCH"
+else
+  BRANCH="helper/$NAME"
+  git -C "$ROOT" worktree add -q "$WT" -b "$BRANCH" "$BASE"
+fi
 # When the base is a remote branch, track it: `git -C $WT pull --ff-only` then
 # refreshes the worktree, which is how a nightly preview stays current.
 case "$BASE" in

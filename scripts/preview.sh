@@ -34,11 +34,13 @@ port_for() {
 dir_for() { printf '%s' "$PREVIEWS/$1"; }
 
 # Where a feature's worktree lives. Ask git first: running the script from inside
-# a worktree otherwise computes a path relative to that worktree.
+# a worktree otherwise computes a path relative to that worktree. A lane runs on
+# its own branch name, a feature on helper/<name>; both are checked here.
 wt_path_for() {
   local name="$1" found
   found="$(git -C "$MAIN" worktree list --porcelain \
-    | awk -v b="refs/heads/helper/$name" '/^worktree /{p=$2} $0=="branch "b{print p}')"
+    | awk -v a="refs/heads/$1" -v b="refs/heads/helper/$1" \
+        '/^worktree /{p=$2} $0=="branch "a || $0=="branch "b{print p}')"
   if [ -n "$found" ]; then printf '%s' "$found"; return; fi
   printf '%s' "${REMOTEPAD_WORKTREE_DIR:-$(dirname "$MAIN")/worktrees}/remotepad-$name"
 }
@@ -191,7 +193,9 @@ API="$(port_for "$NAME" 1)"
 WT="$(wt_path_for "$NAME")"
 WT_ROOT="$(dirname "$WT")"
 mkdir -p "$WT_ROOT" 2>/dev/null || true
-BRANCH="helper/$NAME"
+# Same rule as dev-worktree.sh: a standing branch keeps its name.
+BRANCH="$NAME"
+git -C "$MAIN" rev-parse --verify --quiet "refs/heads/$NAME" >/dev/null || BRANCH="helper/$NAME"
 
 if [ ! -d "$WT" ]; then
   echo "creating worktree $BRANCH from $BASE"

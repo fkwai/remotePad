@@ -167,11 +167,12 @@ Work on a branch in this checkout when the user asks to persist. Branch naming f
 
 - **stable** — `main`, the install on 3847. Release channel; **Update N** pulls it.
 - **dev** — small fixes land here directly (`commit → push origin dev`), no worktree, no PR.
-- **nightly** — `scripts/nightly.sh` (timer 03:00) merges `main` + `dev` + clean `origin/helper/*`, stamps `X.Y.Z-nightly.DATE`, builds, runs the suite, pushes only when green.
-- **feature** — a worktree for risky work: `./scripts/preview.sh <feature> origin/helper/<feature>`, then merge into `dev`.
+- **nightly** — a mirror of `dev`, synced once a night by `scripts/nightly-sync.sh` (timer `scripts/nightly-timer.sh`, 00:00): fetch, reset to `origin/dev`, stamp `X.Y.Z-nightly.DATE`, typecheck, restart the lane, and publish only a lane that answers. A failed night rolls back and leaves the previous commit running.
+- **feature** — a worktree for risky work: `./scripts/preview.sh <feature> origin/dev`, then merge into `dev`.
+- **Branch names** — the three standing branches are `main`, `dev`, `nightly`, and a lane runs on its own name. Only feature work gets a `helper/<feature>` branch (and a Helper session a `helper/work-*`), both disposable.
 - **Running lanes side by side** — `scripts/lanes.sh start|sync|status|stop`. A port belongs to a process in a working tree, so each lane is a worktree instance; never switch the user's checkout between branches.
 - **Version panel** — lane rows show commit + port: **Open** when that lane's instance is running, **Start** (copies the command) when it is not. There is no in-place lane switch.
-- Promotion: `git switch main && git merge --ff-only origin/nightly`, bump the version, tag, delete merged branches/worktrees, realign `dev`/`nightly`.
+- Promotion: `git switch main && git merge --ff-only origin/nightly`, bump the version, tag, delete merged branches/worktrees.
 
 ## Development (agents)
 

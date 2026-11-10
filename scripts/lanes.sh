@@ -36,7 +36,7 @@ start_lane() {
     echo "stable is the install you are already running (port 3847) — nothing to start."
     return 0
   fi
-  # preview.sh <name> origin/<branch> creates helper/<name> tracking the lane.
+  # preview.sh <name> origin/<branch> runs the lane on its own branch name.
   "$ROOT/scripts/preview.sh" "$name" "origin/$branch"
 }
 
