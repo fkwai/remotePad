@@ -1,5 +1,7 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
+// Before App: hands Monaco to the editor loader so nothing reaches for a CDN.
+import './monacoSetup';
 import { App } from './App';
 import './styles.css';
 

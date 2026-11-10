@@ -7,6 +7,25 @@ test.describe('editor tabs', () => {
     await openFixtureTree(page);
   });
 
+  // The editor engine used to come from a CDN: offline it stayed on "Loading…", the
+  // version was whatever the CDN felt like serving, and no test could assert on the
+  // editor itself. With the CDN unreachable the editor still has to work.
+  test('the editor engine is served by this app, not a CDN', async ({ page }) => {
+    const cdn: string[] = [];
+    await page.route('**cdn.jsdelivr.net/**', (route) => {
+      cdn.push(route.request().url());
+      return route.abort();
+    });
+    await page.reload();
+    await openFixtureTree(page);
+
+    await treeRow(page, 'sub').click();
+    await treeRow(page, 'sample.ts').click();
+    await expect(page.locator('.monaco-editor').first()).toBeVisible();
+    await expect(page.locator('.monaco-editor .view-lines').first()).toContainText('answer');
+    expect(cdn).toEqual([]);
+  });
+
   test('one click temp-opens; the next file click replaces the temp tab', async ({ page }) => {
     await treeRow(page, 'a.md').click();
     expect(await tabNames(page)).toEqual(['a.md']);

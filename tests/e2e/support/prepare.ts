@@ -23,6 +23,7 @@ const files: Record<string, string> = {
   'b.csv': 'name,qty\nwidget,3\ngadget,7\n',
   'notes.txt': 'plain text fixture\n',
   'sub/c.json': '{\n  "nested": true\n}\n',
+  'sub/sample.ts': 'export const answer = 42;\n',
   'sub/d.md': '# Delta\n',
 };
 

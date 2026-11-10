@@ -10,6 +10,21 @@ const { host, port, uiPort } = resolveRuntimeSettings(settingsPath);
 
 export default defineConfig({
   plugins: [react()],
+  build: {
+    rollupOptions: {
+      output: {
+        // Monaco is now part of the bundle rather than a CDN fetch. Keeping the
+        // editor core in its own chunk lets the app shell parse while the editor
+        // downloads, and lets it be cached across deployments; the per-language
+        // chunks stay dynamic so only the language in use is fetched.
+        manualChunks(id) {
+          if (!id.includes('/monaco-editor/esm/vs/')) return undefined;
+          if (id.includes('/basic-languages/') || id.includes('/language/')) return undefined;
+          return 'monaco';
+        },
+      },
+    },
+  },
   server: {
     host,
     port: uiPort,
