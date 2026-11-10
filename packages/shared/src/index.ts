@@ -100,6 +100,12 @@ export interface SessionSizes {
   main?: number[];
 }
 
+/** One entry in a pane's tab list. `temp` is the preview tab that gets replaced. */
+export interface PaneEntry {
+  path: string;
+  temp: boolean;
+}
+
 /** A lane (dev / nightly) running beside this install on its own port. */
 export interface LaneInfo {
   name: string;
@@ -127,6 +133,8 @@ export interface SessionState {
   activePath: string | null;
   /** Second editor pane; null keeps the editor single. */
   splitPath?: string | null;
+  /** Each pane's own tab list. Absent on profiles saved before panes split. */
+  panes?: { left: PaneEntry[]; right: PaneEntry[] };
   sideTab: 'favorites' | 'repos';
   termOpen: boolean;
   rightTab: 'agent' | 'machine';

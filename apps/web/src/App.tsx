@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Panel, PanelGroup, PanelResizeHandle, type ImperativePanelGroupHandle } from 'react-resizable-panels';
-import type { AgentBackend, AgentCatsCoList, AgentChange, AgentClientMessage, AgentServerMessage, AgentSessionInfo, AgentStatus, Favorite, FsEntry, FsListResponse, FsReadResponse, FsStatResponse, GitDiffResponse, GitStatusResponse, MachineInfo, ModulesResponse, Repo, ReposResponse, SessionState, TermClientMessage, TermServerMessage, TermSessionInfo, ViewerEnabledMap, ViewerModuleId, WatchServerMessage, SessionSizes } from '@remotepad/shared';
+import type { AgentBackend, AgentCatsCoList, AgentChange, AgentClientMessage, AgentServerMessage, AgentSessionInfo, AgentStatus, Favorite, FsEntry, FsListResponse, FsReadResponse, FsStatResponse, GitDiffResponse, GitStatusResponse, MachineInfo, ModulesResponse, Repo, ReposResponse, SessionState, TermClientMessage, TermServerMessage, TermSessionInfo, ViewerEnabledMap, ViewerModuleId, WatchServerMessage, SessionSizes, PaneEntry } from '@remotepad/shared';
 import { defaultViewerEnabled } from '@remotepad/shared';
 import { api } from './api';
 import { basename, dirname, hasRenderedView, viewerKind } from './files';
@@ -46,6 +46,17 @@ export function App() {
   const [splitPath, setSplitPath] = useState<string | null>(null);
   /** Which pane a file click lands in. */
   const [focusedPane, setFocusedPane] = useState<'left' | 'right'>('left');
+  /**
+   * What each pane is showing, in tab order.
+   *
+   * `tabs` holds one buffer per file; these two lists hold the tabs each pane
+   * shows. Two panes on the same file share the buffer — Monaco keys models by
+   * path — but closing a tab in one pane must not remove it from the other.
+   */
+  const [paneEntries, setPaneEntries] = useState<{ left: PaneEntry[]; right: PaneEntry[] }>({
+    left: [],
+    right: [],
+  });
   /** Left editor pane share of the split; dragged by the divider. */
   const [splitRatio, setSplitRatio] = useState(0.5);
   /** Panel-group layout in percent, kept in the window profile. */
@@ -203,6 +214,58 @@ export function App() {
     splitPathRef.current && focusedPaneRef.current === 'right'
       ? splitPathRef.current
       : activePathRef.current;
+
+  const paneEntriesRef = useRef(paneEntries);
+  paneEntriesRef.current = paneEntries;
+
+  /** The pane a tree click, a drop or a new tab belongs to. */
+  const targetPane = (): 'left' | 'right' => (splitPathRef.current && focusedPaneRef.current === 'right' ? 'right' : 'left');
+
+  /** Show a path in a pane. */
+  const showInPane = (pane: 'left' | 'right', path: string) => {
+    if (pane === 'right') setSplitPath(path);
+    else setActivePath(path);
+  };
+
+  /**
+   * Put a path at the front of a pane's list.
+   *
+   * `pinned` false means a preview tab: a pane keeps at most one, replaced by
+   * the next preview. Pinning an existing entry promotes it in place.
+   */
+  const addEntry = (pane: 'left' | 'right', path: string, pinned: boolean) => {
+    setPaneEntries((prev) => {
+      const rest = prev[pane].filter((entry) => entry.path !== path);
+      const kept = pinned ? rest : rest.filter((entry) => !entry.temp);
+      return { ...prev, [pane]: [{ path, temp: !pinned }, ...kept] };
+    });
+  };
+
+  /** Remove paths from one pane; the buffer survives while the other pane wants it. */
+  const closeInPane = (pane: 'left' | 'right', paths: string[], keepPath: string | null) => {
+    const closing = new Set(paths);
+    setPaneEntries((prev) => ({
+      ...prev,
+      [pane]: prev[pane].filter((entry) => !closing.has(entry.path)),
+    }));
+    if (keepPath && !closing.has(keepPath)) showInPane(pane, keepPath);
+  };
+
+  /** Close the split and forget the right pane's list. */
+  const closeSplit = () => {
+    setSplitPath(null);
+    setFocusedPane('left');
+    setPaneEntries((prev) => ({ ...prev, right: [] }));
+  };
+
+  /** Resolve a pane's entries against the buffers, in tab order. */
+  const resolvePane = (entries: PaneEntry[]): OpenTab[] => {
+    const byPath = new Map(tabs.map((tab) => [tab.path, tab]));
+    return entries.flatMap((entry) => {
+      const tab = byPath.get(entry.path);
+      return tab ? [{ ...tab, temp: entry.temp }] : [];
+    });
+  };
   sideTabRef.current = sideTab;
   const termOpenRef = useRef(termOpen);
   termOpenRef.current = termOpen;
@@ -228,16 +291,31 @@ export function App() {
     watchPath(dir);
   }, []);
 
-  const restoreTabs = useCallback(async (items: SessionState['tabs'], active: string | null, enabled?: ViewerEnabledMap) => {
+  const restoreTabs = useCallback(async (
+    items: SessionState['tabs'],
+    active: string | null,
+    enabled?: ViewerEnabledMap,
+    panes?: SessionState['panes'],
+  ) => {
     const loaded: OpenTab[] = [];
     for (const item of items) {
       const tab = await readTab(item.path, item.viewMode, item.folder, enabled);
       if (tab) loaded.push(tab);
     }
     setTabs(loaded);
-    const next = active && loaded.some((tab) => tab.path === active)
+    const ok = new Set(loaded.map((tab) => tab.path));
+    const keep = (list?: { path: string; temp?: boolean }[]) => (list ?? [])
+      .filter((entry) => ok.has(entry.path))
+      .map((entry) => ({ path: entry.path, temp: entry.temp === true }));
+    const savedLeft = panes?.left ? keep(panes.left) : null;
+    const savedRight = panes?.right ? keep(panes.right) : null;
+    // A profile from before panes split has only the flat list.
+    const left = savedLeft ?? loaded.map((tab) => ({ path: tab.path, temp: false }));
+    const right = savedRight ?? [];
+    setPaneEntries({ left, right });
+    const next = active && ok.has(active)
       ? active
-      : loaded[loaded.length - 1]?.path || null;
+      : left[left.length - 1]?.path || null;
     setActivePath(next);
   }, []);
 
@@ -279,6 +357,7 @@ export function App() {
           const tab = await readTab(padPath, undefined, kind === 'dir', modules?.enabled);
           if (tab) {
             setTabs([tab]);
+            setPaneEntries({ left: [{ path: tab.path, temp: false }], right: [] });
             setActivePath(tab.path);
           }
         } else {
@@ -302,7 +381,7 @@ export function App() {
           setExpanded(new Set(expandedDirs));
           await loadDir(tree);
           for (const dir of expandedDirs) await loadDir(dir);
-          if (session?.tabs?.length) await restoreTabs(session.tabs, session.activePath, modules?.enabled);
+          if (session?.tabs?.length) await restoreTabs(session.tabs, session.activePath, modules?.enabled, session.panes);
         }
       } catch (err) {
         if (!cancelled) showToast(String(err instanceof Error ? err.message : err));
@@ -326,9 +405,10 @@ export function App() {
       .filter((tab) => tab.kind !== 'diff' && !tab.agentPath && !tab.temp)
       .map((tab) => ({ path: tab.path, viewMode: tab.viewMode, folder: tab.kind === 'folder' })),
     activePath,
+    panes: paneEntries,
     sideTab,
     termOpen,
-  }), [repoPath, treeRoot, selected, expanded, tabs, activePath, splitPath, sizes, sideTab, termOpen]);
+  }), [repoPath, treeRoot, selected, expanded, tabs, activePath, splitPath, paneEntries, sizes, sideTab, termOpen]);
 
   /**
    * A pane may only show a file that is actually open, or nothing at all.
@@ -338,18 +418,28 @@ export function App() {
    * lands here instead of rendering an empty editor.
    */
   useEffect(() => {
-    const open = new Set(tabs.map((tab) => tab.path));
-    const leftOk = activePath === null || open.has(activePath);
-    const rightOk = splitPath === null || open.has(splitPath);
-    if (leftOk && rightOk) return;
-    // Prefer a file the other pane is not already showing: two panes on one file
-    // reads like a bug even when it is legal.
-    const spare = (taken: string | null) => tabs.find((tab) => tab.path !== taken)?.path
-      ?? tabs[tabs.length - 1]?.path
+    const pick = (list: PaneEntry[], taken: string | null) => list.find((entry) => entry.path !== taken)?.path
+      ?? list[0]?.path
       ?? null;
-    if (!leftOk) setActivePath(spare(splitPath));
-    if (!rightOk) setSplitPath(splitPath === null ? null : spare(activePath));
-  }, [tabs, activePath, splitPath]);
+    const left = paneEntries.left.map((entry) => entry.path);
+    const right = paneEntries.right.map((entry) => entry.path);
+    // Repair only, never close: an empty list during the first render of a
+    // restore is not the same as a pane the reader emptied.
+    if (left.length && (activePath === null || !left.includes(activePath))) {
+      setActivePath(pick(paneEntries.left, splitPath));
+    }
+    if (splitPath !== null && right.length && !right.includes(splitPath)) {
+      setSplitPath(pick(paneEntries.right, activePath));
+    }
+  }, [paneEntries, activePath, splitPath]);
+
+  /** Drop buffers no pane is showing any more. */
+  useEffect(() => {
+    const live = new Set([...paneEntries.left, ...paneEntries.right].map((entry) => entry.path));
+    setTabs((prev) => (prev.some((tab) => !live.has(tab.path))
+      ? prev.filter((tab) => live.has(tab.path))
+      : prev));
+  }, [paneEntries]);
 
   const putSession = (keepalive = false) => {
     if (padMode) return;
@@ -358,9 +448,15 @@ export function App() {
       treeRoot: treeRootRef.current,
       selected: selectedRef.current,
       expanded: [...expandedRef.current],
+      // One flat list of the files whose buffers exist; the pane lists below say
+      // which pane shows what.
       tabs: tabsRef.current
-        .filter((tab) => tab.kind !== 'diff' && !tab.agentPath && !tab.temp)
+        .filter((tab) => tab.kind !== 'diff' && !tab.agentPath)
         .map((tab) => ({ path: tab.path, viewMode: tab.viewMode, folder: tab.kind === 'folder' })),
+      panes: {
+        left: paneEntriesRef.current.left.filter((entry) => !entry.temp),
+        right: paneEntriesRef.current.right.filter((entry) => !entry.temp),
+      },
       activePath: activePathRef.current,
       splitPath: splitPathRef.current,
       // Absent until the profile has loaded: an early save would otherwise
@@ -740,34 +836,27 @@ export function App() {
       await toggleDir(entry.path);
       return;
     }
-    // A click in the right pane is a deliberate placement, so it is never a
-    // preview tab — previews get evicted by the next click, which is what made
-    // the right pane jump to an unrelated old file.
-    const intoSplit = Boolean(splitPathRef.current) && focusedPaneRef.current === 'right';
-    const keep = !opts?.temp || intoSplit;
-    // A click belongs to the pane the reader is in. Focus is only ever moved by
-    // clicking inside a pane, so opening the split no longer steals the next
-    // tree click to the right-hand side.
+    // A click belongs to the pane the reader is in; a click there is a deliberate
+    // placement, so it is pinned rather than a preview.
+    const pane = targetPane();
+    const pinned = !opts?.temp || pane === 'right';
     const existing = tabsRef.current.find((tab) => tab.path === entry.path);
     if (existing && opts?.reload && !mayReload(existing)) {
       // A watcher event or a terminal "open" must not replace text the reader is
       // still editing; it would also drop the caret at the end of the file.
-      if (intoSplit) setSplitPath(entry.path);
-      else setActivePath(entry.path);
+      addEntry(pane, entry.path, true);
+      showInPane(pane, entry.path);
       showToast(`${entry.name} changed on disk — unsaved edits kept`);
       return;
     }
     if (existing && !opts?.reload) {
-      if (keep && existing.temp) {
-        setTabs((prev) => prev.map((tab) => tab.path === entry.path ? { ...tab, temp: false } : tab));
-      }
-      if (intoSplit) setSplitPath(entry.path);
-      else setActivePath(entry.path);
+      addEntry(pane, entry.path, pinned);
+      showInPane(pane, entry.path);
       return;
     }
     const kind = viewerKind(entry.path, moduleEnabledRef.current);
     if (!existing) {
-      const tab: OpenTab = {
+      setTabs((prev) => [{
         path: entry.path,
         name: entry.name,
         content: '',
@@ -777,25 +866,15 @@ export function App() {
         dirty: false,
         loading: true,
         kind,
-        temp: !keep,
-      };
-      setTabs((prev) => {
-        if (!keep) {
-          // A preview tab is replaced by the next preview. A file a pane is
-          // showing is not a preview any more, whatever opened it.
-          const pinned = new Set([activePathRef.current, splitPathRef.current]);
-          const rest = prev.filter((item) => !item.temp || (item.path && pinned.has(item.path)));
-          return [tab, ...rest];
-        }
-        return [tab, ...prev];
-      });
+        temp: false,
+      }, ...prev]);
     } else {
       setTabs((prev) => prev.map((tab) => tab.path === entry.path
-        ? { ...tab, loading: true, error: undefined, temp: keep ? false : tab.temp }
+        ? { ...tab, loading: true, error: undefined }
         : tab));
     }
-    if (intoSplit) setSplitPath(entry.path);
-    else setActivePath(entry.path);
+    addEntry(pane, entry.path, pinned);
+    showInPane(pane, entry.path);
     try {
       if (kind === 'image' || kind === 'html') {
         setTabs((prev) => prev.map((item) => item.path === entry.path ? {
@@ -836,9 +915,10 @@ export function App() {
     // it into the left pane while they were working on the right made the address
     // bar feel like it went to the wrong place.
     const intoSplit = Boolean(splitPathRef.current) && focusedPaneRef.current === 'right';
+    const pane = targetPane();
     const show = (path: string) => {
-      if (intoSplit) setSplitPath(path);
-      else setActivePath(path);
+      addEntry(pane, path, true);
+      showInPane(pane, path);
     };
     const same = current.find((tab) => tab.kind === 'folder' && tab.path === dir);
     if (same) {
@@ -1247,7 +1327,9 @@ export function App() {
       };
       return [tab, ...rest];
     });
-    setActivePath(filePath);
+    const pane = targetPane();
+    addEntry(pane, filePath, true);
+    showInPane(pane, filePath);
   };
 
   /** Keep already-open editors in step with what the agent just wrote.
@@ -1504,45 +1586,20 @@ export function App() {
     await goToAddressPath(addressDraft);
   };
 
-  const closeTabs = (paths: string[], keepPath: string | null) => {
-    const closing = new Set(paths);
-    const pick = (rest: OpenTab[], preferred: string | null) => (preferred && rest.some((tab) => tab.path === preferred)
-      ? preferred
-      : rest[rest.length - 1]?.path || null);
-    // Read the panes before the state update: the replacer below runs later, and
-    // by then the refs are already new.
-    const previousLeft = activePathRef.current;
-    const previousRight = splitPathRef.current;
-    const next = tabsRef.current.filter((tab) => !closing.has(tab.path));
-    // Both panes are repaired here. Closing a tab used to leave the right pane
-    // pointing at a file that no longer existed, which rendered as an empty pane.
-    const keptLeft = pick(next, keepPath ?? previousLeft);
-    const keptRight = previousRight && !closing.has(previousRight)
-      ? previousRight
-      : pick(next, next.find((tab) => tab.path !== keptLeft)?.path || null);
-    if (keptLeft !== previousLeft) setActivePath(keptLeft);
-    if (keptRight !== previousRight) setSplitPath(keptRight);
-    setTabs((prev) => prev.filter((tab) => !closing.has(tab.path)));
-  };
+
+  const leftTabs = resolvePane(paneEntries.left);
+  const rightTabs = resolvePane(paneEntries.right);
 
   /** The editor renders twice when split: one element, two active files.
    *  Both panes therefore share tabs, dirty state and disk reloads, which is
    *  what splitting an editor has to mean. */
   const renderEditor = (over: Partial<Parameters<typeof EditorArea>[0]> = {}) => (
     <EditorArea
-      tabs={tabs}
+      tabs={leftTabs}
       activePath={activePath}
       onSelect={setActivePath}
-      onCloseMany={closeTabs}
-      onClose={(path) => {
-        setTabs((prev) => {
-          const rest = prev.filter((tab) => tab.path !== path);
-          if (activePathRef.current === path) {
-            setActivePath(rest[rest.length - 1]?.path || null);
-          }
-          return rest;
-        });
-      }}
+      onCloseMany={(paths, keep) => closeInPane('left', paths, keep)}
+      onClose={(path) => closeInPane('left', [path], null)}
       onChange={(path, content) => {
         const reviewTab = tabsRef.current.find((tab) => tab.path === path && tab.agentPath);
         if (reviewTab && !reviewEditedSent.current.has(path)) {
@@ -1778,30 +1835,26 @@ export function App() {
                       e.preventDefault();
                       // Mirror of the right pane: swap in another tab rather than
                       // closing the split or leaving the other side empty.
-                      if (splitPathRef.current === entry.path) {
-                        const next = tabsRef.current.find((tab) => tab.path !== entry.path);
-                        setSplitPath(next?.path || null);
-                      }
+                      addEntry('left', entry.path, true);
                       setActivePath(entry.path);
                       setFocusedPane('left');
                     }}
                   >
                     {renderEditor({
-                      showActions: !splitPath,
+                      showActions: true,
                       splitOpen: Boolean(splitPath),
                       onToggleSplit: () => {
                         if (splitPath) {
-                          setSplitPath(null);
-                          setFocusedPane('left');
+                          closeSplit();
                           return;
                         }
-                        // Fill the new pane with a different tab so the split is
-                        // useful at once, and leave the focus where the reader
-                        // left it: they have not clicked into the right pane yet.
+                        // The right pane starts with a tab of its own so the split
+                        // is useful at once; focus stays where the reader left it.
                         const current = activePathRef.current;
                         const other = tabsRef.current.find((tab) => tab.path !== current);
                         const target = other?.path || current;
                         if (!target) return;
+                        addEntry('right', target, true);
                         setSplitPath(target);
                       },
                     })}
@@ -1856,21 +1909,25 @@ export function App() {
                         // A move, not a copy: hand the left pane something else so
                         // the same file is not shown twice. With nothing else open
                         // the left keeps it — two panes on one file beats a blank.
-                        if (activePathRef.current === entry.path) {
-                          const next = tabsRef.current.find((tab) => tab.path !== entry.path);
-                          if (next) setActivePath(next.path);
-                        }
+                        addEntry('right', entry.path, true);
                         setSplitPath(entry.path);
                         setFocusedPane('right');
                       }}
                     >
                       {renderEditor({
+                        tabs: rightTabs,
                         activePath: splitPath,
                         onSelect: setSplitPath,
-                        hideChrome: true,
-                        onCloseSplit: () => {
-                          setSplitPath(null);
-                          setFocusedPane('left');
+                        onCloseMany: (paths, keep) => closeInPane('right', paths, keep),
+                        onClose: (path) => closeInPane('right', [path], null),
+                        showActions: true,
+                        splitOpen: true,
+                        // Same button as the left pane, same meaning: it closes the
+                        // split. Keeping the two bars identical is the point.
+                        onToggleSplit: closeSplit,
+                        onKeepTab: (path) => {
+                          addEntry('right', path, true);
+                          setSplitPath(path);
                         },
                       })}
                     </div>

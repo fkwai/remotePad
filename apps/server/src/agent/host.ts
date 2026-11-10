@@ -31,6 +31,11 @@ import {
 /** Windows are configurable so tests can prove the settle without a 20s wait. */
 const QUIET = Number(process.env.REMOTEPAD_QUIET_MS || QUIET_MS);
 const TOOL_QUIET = Number(process.env.REMOTEPAD_TOOL_QUIET_MS || TOOL_QUIET_MS);
+/**
+ * Off in dev: what a pane kept is not carried into the next agent message.
+ * See the note in `send()`. Flip to true to restore the `[review]` prefix.
+ */
+const CARRY_REVIEW_INTO_MESSAGES = false;
 import { TurnSnapshot } from './turn-snapshot.ts';
 import {
   agentSessionFile,
@@ -1328,7 +1333,7 @@ export class AgentHost {
    * diagnostics endpoint; the Stop button has been wrong twice, so the state that
    * decides it must be inspectable from outside the process.
    */
-  /** What this session did to files, and what the next message will carry. */
+  /** What this session did to files. Carried into messages only when the flag is on. */
   reviewState() {
     return {
       ...this.review.summary(),
@@ -1780,10 +1785,13 @@ export class AgentHost {
   async send(text: string): Promise<void> {
     const typed = text.trim();
     if (!typed) return;
-    // The next message says what this session kept, ignored or edited. Consuming
-    // the record here is what makes it "since your last message" rather than a
-    // growing prefix on every turn.
-    const review = this.review.takeContext();
+    // PARKED in dev (2026-11): the review record is no longer carried into the
+    // conversation. What a pane kept is recorded per file, and until the buffer
+    // model settles — one buffer per file shared by two panes — a "[review]"
+    // prefix would be telling the agent about decisions the buffer cannot yet
+    // represent faithfully. Recording still happens, so the log stays complete
+    // and turning this back on is this one flag.
+    const review = CARRY_REVIEW_INTO_MESSAGES ? this.review.takeContext() : null;
     const message = review ? `${review}\n\n${typed}` : typed;
     if (this.backend === 'catsco') {
       await this.sendCatsCo(message);

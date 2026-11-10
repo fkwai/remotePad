@@ -83,6 +83,7 @@ function asState(raw: unknown): SessionState {
     // would render an empty pane on every reload.
     splitPath: typeof item.splitPath === 'string'
       && tabs.some((tab) => tab.path === item.splitPath) ? item.splitPath : null,
+    panes: asPanes(item.panes, tabs),
     sideTab,
     // Absent state means "never chosen", which opens the terminal (README/AGENTS);
     // an explicit false is a user choice and stays closed.
@@ -162,6 +163,23 @@ export async function listWindows(): Promise<WindowInfo[]> {
     }
   }
   return out.sort((a, b) => b.updatedAt - a.updatedAt);
+}
+
+/** Two pane lists, each filtered to files that really restored. */
+function asPanes(raw: unknown, tabs: SessionState['tabs']): SessionState['panes'] {
+  const keep = new Set(tabs.map((tab) => tab.path));
+  const list = (value: unknown) => (Array.isArray(value)
+    ? value.flatMap((entry) => {
+      if (!entry || typeof entry !== 'object') return [];
+      const rec = entry as Record<string, unknown>;
+      if (typeof rec.path !== 'string' || !keep.has(rec.path)) return [];
+      return [{ path: rec.path, temp: rec.temp === true }];
+    })
+    : undefined);
+  const left = list((raw as { left?: unknown } | undefined)?.left);
+  const right = list((raw as { right?: unknown } | undefined)?.right);
+  if (!left && !right) return undefined;
+  return { left: left ?? [], right: right ?? [] };
 }
 
 export async function readSession(id?: string): Promise<SessionState> {

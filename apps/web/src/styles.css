@@ -822,13 +822,21 @@ button.tree-node:hover { border-color: transparent; }
   flex: 0 0 auto;
   border-bottom: 1px solid var(--border);
   background: var(--panel-2);
+  /* Both panes must measure the same, whatever their tab count. Without a fixed
+     height an overflowing bar grew by the height of its scrollbar, so the two
+     panes sat 15px apart. */
+  height: 28px;
+  overflow: hidden;
 }
 .tabs {
   flex: 1 1 auto;
   min-width: 0;
   display: flex;
   overflow-x: auto;
+  /* Still scrolls, but the bar never pays for a visible scrollbar. */
+  scrollbar-width: none;
 }
+.tabs::-webkit-scrollbar { display: none; }
 .files-toggle {
   flex: 0 0 auto;
   border-left: 1px solid var(--border);
@@ -1027,17 +1035,6 @@ button.tree-node:hover { border-color: transparent; }
   border-left: 1px solid var(--border);
 }
 .editor-split:not(.split) .editor-pane { flex: 1 1 100%; }
-/* Match .tabs-bar exactly: a shorter bar made the right pane look cramped. */
-.split-head { gap: 6px; }
-.split-head .tabs { flex: 1 1 auto; }
-.split-head .tab { cursor: default; }
-.split-name {
-  font-size: 12px;
-  color: var(--faint);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
 /* Icon buttons: square, same weight, pinned to the right edge of the editor. */
 .files-toggle,
 .split-toggle {
