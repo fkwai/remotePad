@@ -16,7 +16,11 @@ if [ -z "$NAME" ]; then
   exit 1
 fi
 
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# The primary checkout, not the worktree this script happens to be running in:
+# otherwise `dirname` of a worktree puts new worktrees under a nested
+# `worktrees/worktrees/`.
+ROOT="$(git -C "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)" worktree list --porcelain \
+  | awk '/^worktree /{print $2; exit}')"
 # Sibling of the install by default; fall back inside the repo when the parent
 # is not writable (e.g. /srv belongs to root).
 WT_ROOT="${REMOTEPAD_WORKTREE_DIR:-$(cd "$ROOT/.." && pwd)/worktrees}"
