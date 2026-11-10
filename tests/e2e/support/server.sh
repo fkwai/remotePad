@@ -11,6 +11,10 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 STATE="$ROOT/.e2e"
 
 export HOME="$STATE/home"
+# Favourites, workspaces and the repo list follow the account home, not $HOME, so
+# a lane keeps the user's own list. Without this pin the suite reads the real
+# /home/*/.remotepad and the fixtures in .e2e/home are never seen.
+export REMOTEPAD_SHARED_STATE="$STATE/home/.remotepad"
 export REMOTEPAD_SETTINGS="$STATE/settings.json"
 export REMOTEPAD_ROOTS="$STATE/work"
 export REMOTEPAD_SESSION_PATH="$STATE/session.json"

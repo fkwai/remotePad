@@ -1,5 +1,7 @@
 import { expect, test } from '@playwright/test';
-import { gotoApp, openFixtureTree, tabNames, treeRow } from './support/app';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fixtureRoot, gotoApp, openFixtureTree, tabNames, treeRow } from './support/app';
 
 test.describe('sidebar tree', () => {
   test.beforeEach(async ({ page }) => {
@@ -57,5 +59,34 @@ test.describe('sidebar tree', () => {
 
     expect(await tabNames(page)).toEqual(['a.md']);
     await expect(page.locator('.editor-body')).toContainText('Markdown body');
+  });
+
+  test('the frozen root row covers the top of the scroll box when scrolled', async ({ page }) => {
+    // A tree deep enough to scroll, built here so the assertion does not depend
+    // on how tall the fixture happens to be. The row has to be listed, so the
+    // page is reloaded after the folder appears.
+    const deep = path.join(fixtureRoot, 'deep');
+    fs.mkdirSync(deep, { recursive: true });
+    for (let i = 0; i < 60; i++) fs.writeFileSync(path.join(deep, `f${i}.txt`), `${i}\n`);
+    await page.reload();
+    await openFixtureTree(page);
+
+    await treeRow(page, 'deep').click();
+    await expect(treeRow(page, 'f0.txt')).toBeVisible();
+
+    const gap = await page.evaluate(() => {
+      const body = document.querySelector('.tree-body:not(.side-list)') as HTMLElement;
+      body.scrollTop = 120;
+      const frozen = body.querySelector('.tree-node.sticky-root') as HTMLElement;
+      const box = body.getBoundingClientRect();
+      const row = frozen.getBoundingClientRect();
+      return { scrolled: body.scrollTop, gap: Math.round(row.top - box.top), pad: getComputedStyle(body).paddingTop };
+    });
+
+    expect(gap.scrolled).toBeGreaterThan(0);
+    // The frozen row has to meet the box edge; any gap is a strip where the rows
+    // being scrolled past show through.
+    expect(gap.pad).toBe('0px');
+    expect(gap.gap).toBe(0);
   });
 });

@@ -491,7 +491,12 @@ input:focus { border-color: #4a7f73; }
 .resize-handle:hover::after { background: var(--accent); }
 
 .tree-search { padding: 8px; border-bottom: 1px solid var(--border); }
-.tree-body { flex: 1; overflow: auto; padding: 4px 0 12px; }
+/* No padding on the scroller itself: a sticky row snaps to the content box, so
+   top padding left a 4px strip at the top where scrolling rows showed through
+   above the frozen one. The air above the first row is content instead, and
+   scrolls away with it. */
+.tree-body { flex: 1; overflow: auto; padding: 0 0 12px; }
+.tree-body > :first-child { padding-top: 4px; }
 .tree-node {
   display: flex;
   align-items: center;
