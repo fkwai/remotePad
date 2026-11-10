@@ -89,4 +89,51 @@ test.describe('sidebar tree', () => {
     expect(gap.pad).toBe('0px');
     expect(gap.gap).toBe(0);
   });
+
+  // The user's complaint: "I expand many folders and every time I reopen
+  // RemotePad the tree is fresh." Everything above proves the tree works within
+  // one page load; this proves the expansion is still there after a reload.
+  test('expanded folders and the selected row survive a reload', async ({ page }) => {
+    await treeRow(page, 'sub').click();
+    await expect(treeRow(page, 'c.json')).toBeVisible();
+
+    // The save is a PUT fired off the state signature; wait for the profile to
+    // hold the expansion so the reload reads what the app actually stored.
+    await expect
+      .poll(async () => {
+        const stored = await (await page.request.get('/api/session')).json();
+        return (stored.expanded as string[] | undefined)?.length ?? 0;
+      }, { timeout: 8000 })
+      .toBeGreaterThan(1);
+
+    await page.reload();
+    await expect(page.locator('.tree-node').first()).toBeVisible();
+
+    await expect(treeRow(page, 'sub').locator('.tree-twisty')).toHaveClass(/\bopen\b/);
+    await expect(treeRow(page, 'c.json')).toBeVisible();
+    await expect(treeRow(page, 'sub')).toHaveClass(/\bactive\b/);
+  });
+
+  // A profile outlives the filesystem it describes: folders get renamed, deleted,
+  // or become unreadable. Restoring one bad entry used to throw out of the whole
+  // restore block, which reset the tree to `/` — the "always fresh" report.
+  test('one missing folder does not throw away the restored tree', async ({ page }) => {
+    await treeRow(page, 'sub').click();
+    await expect(treeRow(page, 'c.json')).toBeVisible();
+
+    // Take the profile the app itself just wrote, so the paths are the ones it
+    // renders, then add an entry for a folder that is no longer there.
+    const stored = await (await page.request.get('/api/session')).json();
+    const expanded: string[] = stored.expanded;
+    const gone = `${expanded[expanded.length - 1]}/gone`;
+    await page.request.put('/api/session', { data: { ...stored, expanded: [...expanded, gone] } });
+
+    await page.reload();
+    await expect(page.locator('.tree-node').first()).toBeVisible();
+
+    // The tree still points at the fixture, and the folder that does exist is open.
+    await expect(treeRow(page, 'sub').locator('.tree-twisty')).toHaveClass(/\bopen\b/);
+    await expect(treeRow(page, 'c.json')).toBeVisible();
+    await expect(treeRow(page, 'a.md')).toBeVisible();
+  });
 });

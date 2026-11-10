@@ -380,15 +380,41 @@ export function App() {
           const expandedDirs = session?.expanded?.length ? session.expanded : [tree];
           setExpanded(new Set(expandedDirs));
           await loadDir(tree);
-          for (const dir of expandedDirs) await loadDir(dir);
-          if (session?.tabs?.length) await restoreTabs(session.tabs, session.activePath, modules?.enabled, session.panes);
+          // Reopening has to survive reality: a folder renamed, a file deleted, a
+          // directory that may no longer be readable. One stale entry must not
+          // cost the reader the whole layout — that is how "reopen" turned into a
+          // fresh tree.
+          for (const dir of expandedDirs) {
+            try {
+              await loadDir(dir);
+            } catch {
+              setExpanded((prev) => {
+                if (!prev.has(dir)) return prev;
+                const next = new Set(prev);
+                next.delete(dir);
+                return next;
+              });
+            }
+          }
+          if (session?.tabs?.length) {
+            try {
+              await restoreTabs(session.tabs, session.activePath, modules?.enabled, session.panes);
+            } catch (err) {
+              if (!cancelled) {
+                showToast(`restored the tree, not every tab: ${err instanceof Error ? err.message : String(err)}`);
+              }
+            }
+          }
         }
       } catch (err) {
-        if (!cancelled) showToast(String(err instanceof Error ? err.message : err));
-        setTreeRoot('/');
-        setSelected('/');
-        setExpanded(new Set(['/']));
-        void loadDir('/');
+        // Nothing here may throw the layout away: whatever did load stays on
+        // screen and the reader gets the reason instead of an empty tree.
+        if (!cancelled) {
+          showToast(String(err instanceof Error ? err.message : err));
+          setTreeRoot((prev) => prev || '/');
+          setSelected((prev) => prev || '/');
+          setExpanded((prev) => (prev.size ? prev : new Set(['/'])));
+        }
       } finally {
         if (!cancelled) sessionReady.current = true;
       }
