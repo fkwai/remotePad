@@ -241,6 +241,20 @@ export function App() {
     });
   };
 
+  /**
+   * Promote a preview tab to a kept one.
+   *
+   * The pane entry owns this: `resolvePane` reads `temp` from the entry, so
+   * touching a tab buffer alone leaves the tab a preview and it still gets
+   * replaced by the next click — which is what "Keep tab open" used to do.
+   */
+  const keepEntry = (path: string) => {
+    setPaneEntries((prev) => ({
+      left: prev.left.map((entry) => (entry.path === path && entry.temp ? { ...entry, temp: false } : entry)),
+      right: prev.right.map((entry) => (entry.path === path && entry.temp ? { ...entry, temp: false } : entry)),
+    }));
+  };
+
   /** Remove paths from one pane; the buffer survives while the other pane wants it. */
   const closeInPane = (pane: 'left' | 'right', paths: string[], keepPath: string | null) => {
     const closing = new Set(paths);
@@ -1027,8 +1041,12 @@ export function App() {
   const save = async (path: string) => {
     const tab = tabsRef.current.find((item) => item.path === path);
     if (!tab || tab.binary || tab.kind === 'diff' || tab.kind === 'folder') return;
+    // Save writes even when nothing changed: an explicit Ctrl/⌘+S is a request to
+    // put this file on disk, not a diff to be skipped.
     await api('/api/fs/write', { method: 'PUT', body: JSON.stringify({ path, content: tab.content }) });
     setTabs((prev) => prev.map((item) => item.path === path ? { ...item, savedContent: item.content, dirty: false, temp: false } : item));
+    // Saving is a decision to work on this file, so it stops being a preview.
+    keepEntry(path);
     if (controlPathRef.current && path === controlPathRef.current) void reloadRepos();
   };
 
@@ -1634,6 +1652,10 @@ export function App() {
           reviewEditedSent.current.add(path);
           sendAgent({ type: 'review_edited', path });
         }
+        // Typing into a preview tab keeps it: it is no longer something the
+        // reader is just glancing at.
+        const editing = tabsRef.current.find((item) => item.path === path);
+        if (editing?.temp && content !== editing.savedContent) keepEntry(path);
         setTabs((prev) => prev.map((tab) => tab.path === path ? {
           ...tab,
           content,
@@ -1649,7 +1671,7 @@ export function App() {
       onRevert={(path) => void revertFile(path)}
       canRevert={(path) => Boolean(git?.files.some((item) => item.path === path))}
       onKeepTab={(path) => {
-        setTabs((prev) => prev.map((tab) => tab.path === path ? { ...tab, temp: false } : tab));
+        keepEntry(path);
         setActivePath(path);
       }}
       onRunInTerminal={runInTerminal}

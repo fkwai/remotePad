@@ -41,8 +41,33 @@ test.describe('editor tabs', () => {
     await expect(tab(page, 'a.md')).not.toHaveClass(/\btemp\b/);
   });
 
-  test('close button removes the tab and activates its neighbour', async ({ page }) => {
+  // "Keep tab open" used to clear a flag on the tab buffer while the pane kept
+  // rendering `temp` from its own entry, so the tab looked kept for one frame and
+  // was replaced by the next click anyway.
+  test('a tab kept from its own menu is not replaced by the next click', async ({ page }) => {
     await treeRow(page, 'a.md').click();
+    await tab(page, 'a.md').click({ button: 'right' });
+    await page.locator('.menu').getByRole('menuitem', { name: /Keep tab open/ }).click();
+    await expect(tab(page, 'a.md')).not.toHaveClass(/\btemp\b/);
+
+    await treeRow(page, 'b.csv').click();
+    expect(await tabNames(page)).toEqual(['b.csv', 'a.md']);
+  });
+
+  // Saving is a decision about the file, so a preview tab that gets saved stays
+  // open — including when the save changed nothing.
+  test('Ctrl+S keeps a preview tab open, even with no edit', async ({ page }) => {
+    await treeRow(page, 'a.md').click();
+    await expect(tab(page, 'a.md')).toHaveClass(/\btemp\b/);
+
+    await page.keyboard.press('Control+s');
+    await expect(tab(page, 'a.md')).not.toHaveClass(/\btemp\b/);
+
+    await treeRow(page, 'b.csv').click();
+    expect(await tabNames(page)).toEqual(['b.csv', 'a.md']);
+  });
+
+  test('close button removes the tab and activates its neighbour', async ({ page }) => {    await treeRow(page, 'a.md').click();
     await treeRow(page, 'a.md').dblclick(); // pin a.md
     await treeRow(page, 'b.csv').click(); // temp b.csv
     expect(await tabNames(page)).toEqual(['b.csv', 'a.md']);
