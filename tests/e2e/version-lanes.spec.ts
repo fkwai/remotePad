@@ -2,11 +2,14 @@ import { expect, test } from '@playwright/test';
 import { gotoApp } from './support/app';
 
 /**
- * The version panel tells you what you are running and lets you change lane.
+ * The version panel reports what this install runs and lets the reader change
+ * lane.
  *
- * The bug this guards: on a preview branch the badge said `helper/nightly` and the
- * panel warned "no remote ref" even though the branch tracked `origin/nightly`
- * correctly, and there was no way to move to another lane without git.
+ * Two contracts live here. A row says what that lane is *right now* — its head,
+ * its port, whether you are already on it. And pressing Switch loads that lane
+ * **in this window**, keeping `?w=`: a lane is a server, the window is the
+ * profile. Opening a second tab left the reader with two windows and the new one
+ * on that lane's own default layout, which is not "switch to dev".
  */
 const status = (overrides: Record<string, unknown> = {}) => ({
   repo: '/srv/remotepad',
@@ -24,95 +27,110 @@ const status = (overrides: Record<string, unknown> = {}) => ({
   ...overrides,
 });
 
-const lanes = [
+const channels = [
   { name: 'stable', branch: 'main', head: '1111111111111111111111111111111111111111', behind: 3, ahead: 0, current: false },
   { name: 'dev', branch: 'dev', head: '2222222222222222222222222222222222222222', behind: 1, ahead: 0, current: false },
   { name: 'nightly', branch: 'nightly', head: 'abcdef1234567890abcdef1234567890abcdef12', behind: 0, ahead: 0, current: true },
 ];
+
+/** A running lane instance answers on its own port; stable is the install. */
+const lanes = [
+  { name: 'dev', branch: 'dev', alive: true, uiPort: 6200, apiPort: 6300 },
+];
+
+const mockPanel = async (page: import('@playwright/test').Page) => {
+  // `*` after the path: the panel asks twice, the fast pass adds `?remote=0`.
+  await page.route('**/api/update*', (route) => route.fulfill({ json: status() }));
+  await page.route('**/api/channels', (route) => route.fulfill({ json: { channels } }));
+  await page.route('**/api/lanes', (route) => route.fulfill({ json: { lanes } }));
+  await page.route('**/api/previews', (route) => route.fulfill({ json: { previews: [] } }));
+};
 
 async function openPanel(page: import('@playwright/test').Page) {
   await page.locator('.topbar .brand').click();
   await expect(page.locator('.version-pop')).toBeVisible();
 }
 
-/** A running lane instance is a preview named after the lane. */
-const previews = (names: string[]) => ({
-  previews: names.map((name, i) => ({
-    name,
-    uiPort: 6200 + i,
-    apiPort: 6300 + i,
-    alive: true,
-  })),
-});
-
 test.describe('version panel lanes', () => {
-  test('shows the lane name and the upstream it tracks', async ({ page }) => {
-    await page.route('**/api/update', (route) => route.fulfill({ json: status() }));
-    await page.route('**/api/channels', (route) => route.fulfill({ json: { channels: lanes } }));
+  test('names the lane this install runs, not the worktree branch', async ({ page }) => {
+    await mockPanel(page);
     await gotoApp(page);
-
-    // Badge: lane, not the worktree branch name.
-    await expect(page.locator('.topbar .version-badge')).toHaveText(/^nightly@abcdef1$/);
-    await expect(page.locator('.topbar .version-badge')).toHaveAttribute('title', /tracks origin\/nightly/);
 
     await openPanel(page);
     await expect(page.locator('.version-title')).toContainText('v0.0.2-nightly.20261026');
-    await expect(page.locator('.version-rows')).toContainText('nightly → origin/nightly');
-    // No false warning about a missing remote ref.
-    await expect(page.locator('.version-warn')).toHaveCount(0);
+    await expect(page.locator('.version-title .version-branch')).toHaveText('nightly@abcdef1');
   });
 
-  test('lists every lane, opening the ones that run on their own port', async ({ page }) => {
-    await page.route('**/api/update', (route) => route.fulfill({ json: status() }));
-    await page.route('**/api/channels', (route) => route.fulfill({ json: { channels: lanes } }));
-    // stable is here; dev runs; nightly does not.
-    await page.route('**/api/previews', (route) => route.fulfill({ json: previews(['dev']) }));
+  test('each row reports its head, its port and whether you are on it', async ({ page }) => {
+    await mockPanel(page);
     await gotoApp(page);
     await openPanel(page);
 
     const rows = page.locator('.version-channel');
     await expect(rows).toHaveCount(3);
 
+    // stable is the install itself, three commits behind and not running beside it.
     await expect(rows.nth(0)).toContainText('stable');
-    await expect(rows.nth(0)).toContainText('3 behind');
-    // No in-place switching anywhere: a lane is a port, not a checkout rewrite.
-    await expect(page.getByRole('button', { name: 'Switch' })).toHaveCount(0);
+    await expect(rows.nth(0).locator('.version-channel-meta')).toContainText('· install');
+    await expect(rows.nth(0).locator('.version-channel-meta')).toContainText('3 behind');
+    await expect(rows.nth(0).getByRole('button', { name: 'Switch' })).toBeDisabled();
 
-    await expect(rows.nth(1)).toContainText(':6200');
-    await expect(rows.nth(1).locator('button')).toHaveText('Open');
-    await expect(rows.nth(1).locator('button')).toHaveAttribute('title', /port 6200/);
+    // dev runs on its own port, so it can be switched to.
+    await expect(rows.nth(1).locator('.version-channel-meta')).toContainText(':6200');
+    await expect(rows.nth(1).locator('.version-channel-meta')).toContainText('1 behind');
+    await expect(rows.nth(1).getByRole('button', { name: 'Switch' })).toBeEnabled();
+    await expect(rows.nth(1).getByRole('button', { name: 'Switch' }))
+      .toHaveAttribute('title', /Switch this window to dev on :6200/);
 
-    await expect(rows.nth(2)).toContainText('here');
-    await expect(rows.nth(2).locator('button')).toHaveCount(0);
-
-    // A lane with no instance offers the command instead of a broken link.
-    await expect(rows.nth(0).locator('button')).toHaveText('Start');
-    await expect(rows.nth(0).locator('button')).toHaveAttribute('title', /lanes\.sh start stable/);
+    // The lane you are on says so, and has nowhere to switch to.
+    await expect(rows.nth(2).locator('.version-channel-meta')).toContainText('· here');
+    await expect(rows.nth(2).getByRole('button', { name: 'Switch' })).toBeDisabled();
   });
 
-  test('Open points at that lane’s port and says how to reach it', async ({ page, context }) => {
-    await page.route('**/api/update', (route) => route.fulfill({ json: status() }));
-    await page.route('**/api/channels', (route) => route.fulfill({ json: { channels: lanes } }));
-    await page.route('**/api/previews', (route) => route.fulfill({ json: previews(['dev']) }));
-    // Stand in for the dev lane's own instance so the popup can actually load.
+  test('Switch loads that lane in this window and keeps ?w=', async ({ page, context }) => {
+    await mockPanel(page);
+    // Stand in for the dev lane's own instance so the navigation can land.
     await context.route('**/*', async (route) => {
-      if (route.request().url().includes(':6200')) {
+      const url = route.request().url();
+      if (url.includes(':6200')) {
         return route.fulfill({ contentType: 'text/html', body: '<h1>dev lane</h1>' });
       }
       return route.fallback();
     });
+
+    await page.goto('/?w=alpha');
+    await expect(page.locator('.app')).toBeVisible();
+    await openPanel(page);
+
+    await page.locator('.version-channel').nth(1).getByRole('button', { name: 'Switch' }).click();
+
+    await expect(page.locator('h1')).toHaveText('dev lane');
+    // Same window, other server: no new tab, and the profile id survives.
+    expect(page.url()).toContain(':6200/?w=alpha');
+  });
+
+  test('Ctrl-click opens the lane in a new tab instead', async ({ page, context }) => {
+    await mockPanel(page);
+    await context.route('**/*', async (route) => {
+      const url = route.request().url();
+      if (url.includes(':6200')) {
+        return route.fulfill({ contentType: 'text/html', body: '<h1>dev lane</h1>' });
+      }
+      return route.fallback();
+    });
+
     await gotoApp(page);
     await openPanel(page);
 
     const [popup] = await Promise.all([
       page.waitForEvent('popup'),
-      page.locator('.version-channel').nth(1).locator('button').click(),
+      page.locator('.version-channel').nth(1)
+        .getByRole('button', { name: 'Switch' })
+        .click({ modifiers: ['Control'] }),
     ]);
-    await expect(popup.locator('h1')).toHaveText('dev lane');
     expect(popup.url()).toContain(':6200');
+    // This window stays where it was.
+    await expect(page.locator('.version-pop')).toBeVisible();
     await popup.close();
-
-    await expect(page.locator('.version-note')).toContainText('6200');
-    await expect(page.locator('.version-note')).toContainText('ssh -N -L 6200:127.0.0.1:6200');
   });
 });

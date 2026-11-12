@@ -3,6 +3,7 @@ import path from 'node:path';
 import type { FastifyInstance } from 'fastify';
 import type { FsEntry, FsKind, FsReadResponse } from '@remotepad/shared';
 import { copyInto } from '../fs-copy.ts';
+import { config } from '../config.ts';
 import { PathError, exists, resolveSafe, uniqueRoots } from '../paths.ts';
 
 const IMAGE_EXT = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg', '.bmp', '.ico']);
@@ -42,8 +43,11 @@ function looksBinary(buf: Buffer): boolean {
  * the browser parses it, Monaco lays it out. A multi-hundred-MB log did all
  * three and froze the window with no way out — the tab had already been saved,
  * so every reload re-opened it. Refusing early turns a hang into a sentence.
+ *
+ * The ceiling is the instance's own `REMOTEPAD_TEXT_LIMIT` (8 MB by default),
+ * the same limit the agent applies before it reads a file as text.
  */
-const MAX_EDITOR_BYTES = 5 * 1024 * 1024;
+const MAX_EDITOR_BYTES = config.textSizeLimit;
 
 /** The image and HTML viewers stream bytes instead of text; they may be bigger. */
 const MAX_RAW_BYTES = 32 * 1024 * 1024;

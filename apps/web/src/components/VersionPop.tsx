@@ -88,6 +88,22 @@ export function VersionPop({ onClose, currentWindow }: { onClose: () => void; cu
     setNote(`Opened ${url}`);
   };
 
+  /**
+   * Move *this* window to another lane.
+   *
+   * A lane is a server on its own port, so switching is a load of that port in
+   * this tab — with `?w=` kept. Opening a second tab instead left the reader
+   * with two windows and the new one on that lane's own default layout, which
+   * is not what "switch to dev" means: the window is the profile, the lane is
+   * only what serves it.
+   */
+  const switchTo = (name: string, port: number) => {
+    const url = new URL(windowUrl(currentWindow));
+    url.port = String(port);
+    setNote(`Switching to ${name} on :${port}`);
+    location.assign(url.toString());
+  };
+
   const runLane = async (name: string) => {
     setNote(`Starting ${name}…`);
     setStarting((prev) => (prev.includes(name) ? prev : [...prev, name]));
@@ -204,11 +220,17 @@ export function VersionPop({ onClose, currentWindow }: { onClose: () => void; cu
                   )}
                   <button
                     type="button"
-                    className="ghost version-channel-go"
-                    title={port ? `Open ${channel.name} on port ${port}` : 'Not running yet'}
+                    className="ghost version-channel-go version-channel-switch"
+                    title={port
+                      ? `Switch this window to ${channel.name} on :${port} (Ctrl/⌘-click: new tab)`
+                      : 'Not running yet'}
                     disabled={!live || !port}
-                    onClick={() => port && openPort(port)}
-                  >Open</button>
+                    onClick={(event) => {
+                      if (!port) return;
+                      if (event.metaKey || event.ctrlKey) openPort(port);
+                      else switchTo(channel.name, port);
+                    }}
+                  >Switch</button>
                 </div>
               );
             })}
@@ -237,7 +259,12 @@ export function VersionPop({ onClose, currentWindow }: { onClose: () => void; cu
                 <button
                   type="button"
                   className="ghost version-preview-copy"
-                  title={preview.alive ? `Open :${preview.uiPort}` : 'Not running'}
+                  // The port is bound to the server's loopback, so opening it from
+                  // a remote browser needs the tunnel; say so instead of failing
+                  // silently in a new tab.
+                  title={preview.alive
+                    ? `Open :${preview.uiPort} — tunnel first: ssh -N -L ${preview.uiPort}:127.0.0.1:${preview.uiPort} <host>`
+                    : 'Not running'}
                   disabled={!preview.alive}
                   onClick={() => openPort(preview.uiPort)}
                 >open</button>

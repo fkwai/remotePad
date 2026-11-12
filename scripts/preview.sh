@@ -223,6 +223,18 @@ fi
 HOME_DIR="$HOME/.remotepad-preview/$NAME"
 mkdir -p "$HOME_DIR/.remotepad"
 
+# Which window store this instance saves into.
+#
+# A channel lane (stable/dev/nightly) is what the reader switches to from the
+# version panel: `Switch` keeps `?w=`, so the layout has to be there on the other
+# side — same window, other build. Feature previews keep their own store, so a
+# half-finished branch cannot leave the reader's own window unopenable.
+ACCOUNT_HOME="$(getent passwd "$(id -u)" | cut -d: -f6)"
+SESSION_PATH="$HOME_DIR/session.json"
+case "$NAME" in
+  stable|dev|nightly) SESSION_PATH="$ACCOUNT_HOME/.remotepad/session/default.json" ;;
+esac
+
 # Settings the user expects to find in a preview (favorites, pinned repos,
 # viewer modules, model keys) are shared by symlink. Everything that describes a
 # *running* session (tabs, agent backend/topic, history, accepted changes) stays
@@ -251,7 +263,7 @@ start_one() {
     setsid nohup env \
       HOME="$HOME_DIR" \
       REMOTEPAD_SETTINGS="$SETTINGS" \
-      REMOTEPAD_SESSION_PATH="$HOME_DIR/session.json" \
+      REMOTEPAD_SESSION_PATH="$SESSION_PATH" \
       REMOTEPAD_ROOTS="$HOME_DIR" \
       "$@" > "$PID_DIR/$label.log" 2>&1 < /dev/null &
   )

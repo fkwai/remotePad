@@ -50,7 +50,7 @@ test.describe('address bar', () => {
    */
   test('a file too large for the editor says so instead of freezing', async ({ page }) => {
     const huge = path.join(fixtureRoot, 'huge.log');
-    fs.writeFileSync(huge, 'x'.repeat(6 * 1024 * 1024));
+    fs.writeFileSync(huge, 'x'.repeat(9 * 1024 * 1024));
 
     await goToPath(page, huge);
 

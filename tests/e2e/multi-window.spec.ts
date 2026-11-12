@@ -1,6 +1,6 @@
 import path from 'node:path';
 import { expect, test } from '@playwright/test';
-import { fixture, fixtureRoot } from './support/app';
+import { fixture, fixtureRoot, goToPath } from './support/app';
 
 /**
  * Two windows, two workspaces.
@@ -63,17 +63,13 @@ test.describe('multiple windows', () => {
     expect(plain.treeRoot).not.toBe('/srv/gamma');
   });
 
-  test('right-clicking the wordmark opens a new window', async ({ page, context }) => {
+  test('+ New in the version panel opens another window', async ({ page, context }) => {
     await open(page, 'epsilon');
 
-    await page.locator('.topbar .brand').click({ button: 'right' });
-    const menu = page.locator('.menu');
-    await expect(menu).toBeVisible();
-    await expect(menu.getByRole('menuitem', { name: /Open new window/ })).toBeVisible();
-
+    await page.locator('.topbar .brand').click();
     const [popup] = await Promise.all([
       context.waitForEvent('page'),
-      menu.getByRole('menuitem', { name: /Open new window/ }).click(),
+      page.locator('.version-window-new').click(),
     ]);
     await popup.waitForLoadState('domcontentloaded');
 
@@ -83,11 +79,25 @@ test.describe('multiple windows', () => {
     await popup.close();
   });
 
-  test('copying the window link keeps the id', async ({ page }) => {
+  test('the panel lists this window and reopens it by the same id', async ({ page, context }) => {
+    // A profile is written when the layout changes, so give this window a tab.
     await open(page, 'zeta');
-    await page.locator('.topbar .brand').click({ button: 'right' });
-    await page.locator('.menu').getByRole('menuitem', { name: /Copy link/ }).click();
-    await expect(page.locator('.toast')).toContainText('/?w=zeta');
+    const saved = page.waitForResponse((res) =>
+      res.url().includes('/api/session') && res.request().method() === 'PUT');
+    await goToPath(page, fixture.markdown);
+    await saved;
+
+    await page.locator('.topbar .brand').click();
+    const row = page.locator('.version-window').filter({ hasText: 'zeta' });
+    await expect(row).toHaveClass(/current/);
+    await expect(row).toContainText('here');
+
+    const [popup] = await Promise.all([
+      context.waitForEvent('page'),
+      row.locator('.version-window-open').click(),
+    ]);
+    expect(new URL(popup.url()).searchParams.get('w')).toBe('zeta');
+    await popup.close();
   });
 
   test('fixtures are reachable in the second window too', async ({ page }) => {

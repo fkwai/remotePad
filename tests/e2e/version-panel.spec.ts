@@ -21,7 +21,7 @@ test.describe('version panel', () => {
   });
 
   test('the wordmark opens version, commit and origin state', async ({ page }) => {
-    await page.route('**/api/update', (route) => route.fulfill({ json: status() }));
+    await page.route('**/api/update*', (route) => route.fulfill({ json: status() }));
     await gotoApp(page);
 
     await page.locator('.topbar .brand').click();
@@ -30,13 +30,14 @@ test.describe('version panel', () => {
 
     await expect(pop.locator('.version-title')).toContainText('v0.0.1');
     await expect(pop.locator('.version-title')).toContainText('main@abcdef1');
-    await expect(pop).toContainText('/srv/remotepad');
     await expect(pop).toContainText('up to date');
-    await expect(pop).toContainText('clean');
+    // A clean tree says nothing: the repo path moved to the top bar's repo chip,
+    // and "clean" was noise next to it.
+    await expect(pop.locator('.version-dirty')).toHaveCount(0);
   });
 
   test('reports pending pulls and a dirty tree', async ({ page }) => {
-    await page.route('**/api/update', (route) =>
+    await page.route('**/api/update*', (route) =>
       route.fulfill({ json: status({ behind: 3, ahead: 1, dirty: true, canUpdate: false }) }));
     await gotoApp(page);
 
@@ -47,7 +48,7 @@ test.describe('version panel', () => {
   });
 
   test('no gesture manual is attached to the wordmark any more', async ({ page }) => {
-    await page.route('**/api/update', (route) => route.fulfill({ json: status() }));
+    await page.route('**/api/update*', (route) => route.fulfill({ json: status() }));
     await gotoApp(page);
 
     await page.locator('.topbar .brand').click();
@@ -57,7 +58,7 @@ test.describe('version panel', () => {
   });
 
   test('closes from its own close button', async ({ page }) => {
-    await page.route('**/api/update', (route) => route.fulfill({ json: status() }));
+    await page.route('**/api/update*', (route) => route.fulfill({ json: status() }));
     await gotoApp(page);
 
     await page.locator('.topbar .brand').click();
@@ -76,7 +77,7 @@ test.describe('version panel previews', () => {
   };
 
   test('lists running previews with the port to forward', async ({ page }) => {
-    await page.route('**/api/update', (route) => route.fulfill({ json: status }));
+    await page.route('**/api/update*', (route) => route.fulfill({ json: status }));
     await page.route('**/api/previews', (route) => route.fulfill({
       json: {
         previews: [
@@ -99,11 +100,11 @@ test.describe('version panel previews', () => {
   });
 
   test('says none are running when there are none', async ({ page }) => {
-    await page.route('**/api/update', (route) => route.fulfill({ json: status }));
+    await page.route('**/api/update*', (route) => route.fulfill({ json: status }));
     await page.route('**/api/previews', (route) => route.fulfill({ json: { previews: [] } }));
 
     await gotoApp(page);
     await page.locator('.topbar .brand').click();
-    await expect(page.locator('.version-previews')).toContainText('None running');
+    await expect(page.locator('.version-previews')).toContainText('No feature previews running.');
   });
 });

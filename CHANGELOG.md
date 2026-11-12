@@ -5,8 +5,15 @@
 - An unopenable layout no longer traps a window: `×` in the version panel's
   Windows list now forgets `default` too, and any window accepts `?reset=1` to
   start blank without restoring
-- The editor refuses files over 5 MB with their size instead of freezing the tab
-  (the tab was saved, so every reload froze it again); `/api/fs/raw` caps at 32 MB
+- The editor refuses files over `REMOTEPAD_TEXT_LIMIT` (8 MB default) with their
+  size instead of freezing the tab (the tab was saved, so every reload froze it
+  again); `/api/fs/raw` caps at 32 MB
+- Switching lane in the version panel loads that lane in the current window and
+  keeps `?w=`; it used to open a second tab on that lane's own default window
+  (Ctrl/⌘-click still opens a new tab)
+- `preview.sh`: a channel lane (stable/dev/nightly) saves into the install's own
+  window store, so switching lane keeps the layout; feature previews keep their
+  own, so a half-finished branch cannot leave the reader's window unopenable
 - e2e: the suite pins `REMOTEPAD_SHARED_STATE` to its own HOME, so favourites and
   the repos control file no longer come from the real `~/.remotepad`
 
