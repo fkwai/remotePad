@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+- An unopenable layout no longer traps a window: `×` in the version panel's
+  Windows list now forgets `default` too, and any window accepts `?reset=1` to
+  start blank without restoring
+- The editor refuses files over 5 MB with their size instead of freezing the tab
+  (the tab was saved, so every reload froze it again); `/api/fs/raw` caps at 32 MB
+- e2e: the suite pins `REMOTEPAD_SHARED_STATE` to its own HOME, so favourites and
+  the repos control file no longer come from the real `~/.remotepad`
+
 ## 0.0.3 — 2026-10-26
 
 Promoted from the 2026-10-26 nightly.

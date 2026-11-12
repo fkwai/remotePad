@@ -35,6 +35,24 @@ function looksBinary(buf: Buffer): boolean {
   return slice.includes(0);
 }
 
+/**
+ * A file the editor can carry.
+ *
+ * `/api/fs/read` sends the whole file as one JSON string: the server builds it,
+ * the browser parses it, Monaco lays it out. A multi-hundred-MB log did all
+ * three and froze the window with no way out — the tab had already been saved,
+ * so every reload re-opened it. Refusing early turns a hang into a sentence.
+ */
+const MAX_EDITOR_BYTES = 5 * 1024 * 1024;
+
+/** The image and HTML viewers stream bytes instead of text; they may be bigger. */
+const MAX_RAW_BYTES = 32 * 1024 * 1024;
+
+function megabytes(bytes: number): string {
+  const mb = bytes / (1024 * 1024);
+  return `${mb >= 10 ? Math.round(mb) : Math.round(mb * 10) / 10} MB`;
+}
+
 async function toEntry(parent: string, name: string): Promise<FsEntry | null> {
   const full = path.join(parent, name);
   try {
@@ -90,6 +108,12 @@ export async function registerFsRoutes(app: FastifyInstance) {
     const target = resolveSafe(req.query.path || '');
     const stat = await statOr404(target, 'File');
     if (stat.isDirectory()) throw new PathError('Cannot read a directory');
+    if (stat.size > MAX_EDITOR_BYTES) {
+      throw new PathError(
+        `File is too large for the editor (${megabytes(stat.size)}, limit ${megabytes(MAX_EDITOR_BYTES)})`,
+        413,
+      );
+    }
     const buf = await fs.readFile(target);
     const ext = path.extname(target).toLowerCase();
     const binary = looksBinary(buf) && ext !== '.svg';
@@ -108,6 +132,12 @@ export async function registerFsRoutes(app: FastifyInstance) {
     const target = resolveSafe(req.query.path || '');
     const stat = await statOr404(target, 'File');
     if (stat.isDirectory()) throw new PathError('Cannot read a directory');
+    if (stat.size > MAX_RAW_BYTES) {
+      throw new PathError(
+        `File is too large to view (${megabytes(stat.size)}, limit ${megabytes(MAX_RAW_BYTES)})`,
+        413,
+      );
+    }
     const ext = path.extname(target).toLowerCase();
     reply.header('Content-Type', MIME[ext] || 'application/octet-stream');
     reply.header('Cache-Control', 'no-store');

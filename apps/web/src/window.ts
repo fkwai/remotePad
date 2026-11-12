@@ -32,3 +32,15 @@ export function windowUrl(id: string): string {
   const base = `${location.origin}${location.pathname}`;
   return id === 'default' ? base : `${base}?w=${encodeURIComponent(id)}`;
 }
+
+/**
+ * The same window, asked to start blank.
+ *
+ * Reading this flag must happen before the app fetches its saved layout: a
+ * layout can be unloadable (a huge file, a folder that moved), and then the
+ * only way back into the window is a URL that skips the restore.
+ */
+export function resetUrl(id: string): string {
+  const base = windowUrl(id);
+  return `${base}${base.includes('?') ? '&' : '?'}reset=1`;
+}

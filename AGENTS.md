@@ -133,6 +133,9 @@ If a job is about click / double-click / reveal / scroll, read this table first.
 | File **paste** | `Ctrl/Cmd+V` in a folder (tree row or Explorer) | menu: **Paste here** (only when something is on the clipboard); copies as `name copy.ext` when the name is taken |
 | Top bar **RemotePad** | right-click | window menu: Open new window · Copy link to this window · Open the default window |
 | Window | `?w=<id>` | own layout + own Agent host; no `?w=` is the default window |
+| Window row in the version panel | `×` | forget that window's saved layout — **including `default`**: a layout can be unopenable, and the plain link was the one window with no way out. Forgetting the window you are in reloads it blank |
+| Any window | `?reset=1` | start blank and skip the restore (`window.ts` `resetUrl`); the flag is dropped from the bar after use. Works when the saved layout freezes the page, because a URL is the one control that still answers |
+| Editor | file over 5 MB | refused with its size instead of loading (`routes/fs.ts` `MAX_EDITOR_BYTES`); `/api/fs/raw` (image/HTML viewers) allows 32 MB. Never raise this to "make the file open": the whole file travels as one JSON string |
 | Top bar **RemotePad** | click | version panel (`VersionPop.tsx`): version, lane, `branch → upstream`, tree state, lane switcher, previews. No gesture manual. |
 | Agent **change** | per block | Keep / Ignore one hunk (`ReviewBlocks.tsx`); Ignore rebuilds the file with that block reverted (`revertBlock`, shared) |
 | Agent **review record** | automatic | `ReviewLog` per session key: kept/ignored/edited events; the next `send()` in that session prepends it once. Inspect with `GET /api/agent/review?w=` |

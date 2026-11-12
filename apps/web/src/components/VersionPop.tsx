@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { ChannelStatus, LaneInfo, PreviewInfo, UpdateStatus, WindowInfo } from '@remotepad/shared';
 import { api } from '../api';
-import { newWindowId, windowUrl } from '../window';
+import { newWindowId, resetUrl, windowUrl } from '../window';
 
 /** Lanes that are channels in their own right, not one-off previews. */
 const CHANNEL_NAMES = new Set(['stable', 'dev', 'nightly']);
@@ -107,6 +107,10 @@ export function VersionPop({ onClose, currentWindow }: { onClose: () => void; cu
     try {
       await api(`/api/windows/${encodeURIComponent(id)}`, { method: 'DELETE' });
       setWindows((prev) => prev.filter((item) => item.id !== id));
+      // Forgetting the window you are sitting in has to reach the page itself:
+      // it saves its layout on the next change, which would bring it straight
+      // back — that is how a bad layout became permanent.
+      if (id === currentWindow) location.replace(resetUrl(id));
     } catch (err) {
       setNote(err instanceof Error ? err.message : String(err));
     }
@@ -154,14 +158,14 @@ export function VersionPop({ onClose, currentWindow }: { onClose: () => void; cu
                   {item.id}{item.id === currentWindow ? ' · here' : ''}
                 </span>
               </button>
-              {item.id !== 'default' && (
-                <button
-                  type="button"
-                  className="ghost version-window-del"
-                  title={`Delete the saved profile for ${item.id}`}
-                  onClick={() => void deleteWindow(item.id)}
-                >×</button>
-              )}
+              <button
+                type="button"
+                className="ghost version-window-del"
+                title={item.id === currentWindow
+                  ? 'Forget this layout and start blank'
+                  : `Forget the saved profile for ${item.id}`}
+                onClick={() => void deleteWindow(item.id)}
+              >×</button>
             </div>
           ))}
         </div>

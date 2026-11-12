@@ -113,16 +113,30 @@ function asSizes(raw: unknown): SessionSizes | undefined {
   };
 }
 
-/** Remove a window's saved profile. `default` is kept: it is the plain link. */
+/** Remove a window's saved profile. */
 export async function deleteWindow(id: string): Promise<boolean> {
   const win = windowId(id);
-  if (win === 'default') return false;
+  const file = sessionPathFor(win);
+  let removed = false;
   try {
-    await fs.unlink(sessionPathFor(win));
-    return true;
+    await fs.unlink(file);
+    removed = true;
   } catch {
-    return false;
+    // No profile saved yet: forgetting it is already true.
   }
+  // `default` is the plain link, but it is also where a poisoned layout lands
+  // (a huge file saved as a tab froze every reload, with nothing to click).
+  // Forget it like any other window — and the pre-move file with it, because
+  // readSession adopts that one when the new path is missing.
+  if (win === 'default') {
+    try {
+      await fs.unlink(LEGACY_SESSION_PATH);
+      removed = true;
+    } catch {
+      // Not there, or already moved.
+    }
+  }
+  return removed;
 }
 
 /** Every window (`?w=`) that has a saved profile, newest first. */

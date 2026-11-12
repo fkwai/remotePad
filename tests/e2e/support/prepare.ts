@@ -60,6 +60,12 @@ export function prepare(): E2EState {
     fs.writeFileSync(path.join(work, name), body);
   }
 
+  // Favourites, the repos control file and the saved sessions live in one
+  // "shared state" directory that is looked up from the account's passwd entry,
+  // not from $HOME — a test that only redirected HOME was reading and writing
+  // the real `~/.remotepad`. Pin it here, to the same seeded directory.
+  process.env.REMOTEPAD_SHARED_STATE = path.join(home, '.remotepad');
+
   // Same ports the Playwright config boots the two servers on.
   const apiPort = Number(process.env.E2E_API_PORT || 3999);
   const uiPort = Number(process.env.E2E_UI_PORT || 3998);

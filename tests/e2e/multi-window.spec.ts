@@ -128,3 +128,51 @@ test.describe('agent per window', () => {
     await other.close();
   });
 });
+
+/**
+ * A saved layout can be unopenable: a tab on a file too big for the editor froze
+ * the window, and because the layout is saved, every reload came back the same
+ * way. `default` is the plain link, so it was the one window with no way out.
+ */
+test.describe('forgetting a layout', () => {
+  const shape = (treeRoot: string, file: string) => ({
+    repoPath: null,
+    treeRoot,
+    selected: file,
+    expanded: [treeRoot],
+    tabs: [{ path: file, viewMode: 'rendered', folder: false }],
+    activePath: file,
+    sideTab: 'favorites',
+    termOpen: true,
+    rightTab: 'agent',
+  });
+
+  test('the default window can be forgotten like a named one', async ({ page }) => {
+    await page.request.put('/api/session', { data: shape(fixtureRoot, fixture.markdown) });
+
+    await page.goto('/');
+    await expect(page.locator('.tabs .tab').filter({ hasText: 'a.md' })).toHaveCount(1);
+
+    await page.locator('.topbar .brand').click();
+    const row = page.locator('.version-window').filter({ hasText: 'default' });
+    await expect(row).toHaveCount(1);
+    await row.locator('.version-window-del').click();
+
+    // Forgetting the window you are sitting in reaches the page itself.
+    await expect(page.locator('.tabs .tab')).toHaveCount(0);
+    await expect(page.locator('input.path-input')).toHaveValue('/');
+
+    const saved = await (await page.request.get('/api/session')).json();
+    expect(saved.tabs).toEqual([]);
+  });
+
+  test('?reset=1 starts blank instead of restoring the layout', async ({ page }) => {
+    await page.request.put('/api/session', { data: shape(fixtureRoot, fixture.markdown) });
+
+    await page.goto('/?reset=1');
+    await expect(page.locator('.app')).toBeVisible();
+    await expect(page.locator('.tabs .tab')).toHaveCount(0);
+    // The flag is spent, so a reload keeps whatever the reader does next.
+    await expect(page).toHaveURL(/\/$/);
+  });
+});

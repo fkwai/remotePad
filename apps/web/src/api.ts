@@ -1,3 +1,13 @@
+/** A failed request, with the status the caller sometimes has to act on. */
+export class ApiError extends Error {
+  readonly status: number;
+
+  constructor(message: string, status: number) {
+    super(message);
+    this.status = status;
+  }
+}
+
 export async function api<T>(url: string, init?: RequestInit): Promise<T> {
   const res = await fetch(url, {
     ...init,
@@ -14,7 +24,7 @@ export async function api<T>(url: string, init?: RequestInit): Promise<T> {
     } catch {
       // keep status text
     }
-    throw new Error(message);
+    throw new ApiError(message, res.status);
   }
   return res.json() as Promise<T>;
 }

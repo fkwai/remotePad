@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Panel, PanelGroup, PanelResizeHandle, type ImperativePanelGroupHandle } from 'react-resizable-panels';
 import type { AgentBackend, AgentCatsCoList, AgentChange, AgentClientMessage, AgentServerMessage, AgentSessionInfo, AgentStatus, Favorite, FsEntry, FsListResponse, FsReadResponse, FsStatResponse, GitDiffResponse, GitStatusResponse, MachineInfo, ModulesResponse, Repo, ReposResponse, SessionState, TermClientMessage, TermServerMessage, TermSessionInfo, ViewerEnabledMap, ViewerModuleId, WatchServerMessage, SessionSizes, PaneEntry } from '@remotepad/shared';
 import { defaultViewerEnabled } from '@remotepad/shared';
-import { api } from './api';
+import { api, ApiError } from './api';
 import { basename, dirname, hasRenderedView, viewerKind } from './files';
 import { prepareRunText } from './runSelection';
 import { browserPadUrl, hasEntryDrag, readEntryDrag } from './dnd';
@@ -67,6 +67,17 @@ export function App() {
   /** This tab's window id (`?w=`); 'default' for an ordinary link. */
   const win = useRef(windowIdFromUrl()).current;
   const winQuery = windowQuery(win);
+  /**
+   * `?reset=1`: start blank and forget the saved layout.
+   *
+   * Read before anything is restored, because the reason to ask for it is
+   * usually that the saved layout cannot be loaded — a tab on a file too big to
+   * open froze the window, and the layout then came back on every reload. A URL
+   * is the one control that still works on a page that is not answering.
+   */
+  const resetRequested = useRef(
+    typeof location !== 'undefined' && new URLSearchParams(location.search).has('reset'),
+  ).current;
 
   useEffect(() => {
     let cancelled = false;
@@ -343,12 +354,20 @@ export function App() {
     let cancelled = false;
     sessionReady.current = false;
     api<MachineInfo>('/api/machine').then(setMachine).catch(() => undefined);
+    if (resetRequested) {
+      // Forget this window's profile and drop the flag from the bar, so the
+      // next reload restores what the reader does now instead of blanking again.
+      void api(`/api/windows/${encodeURIComponent(win)}`, { method: 'DELETE' }).catch(() => undefined);
+      const url = new URL(location.href);
+      url.searchParams.delete('reset');
+      history.replaceState(null, '', `${url.pathname}${url.search}${url.hash}`);
+    }
     (async () => {
       try {
         const [favs, listed, session, modules] = await Promise.all([
           api<{ folders: Favorite[] }>('/api/favorites').catch(() => ({ folders: [] as Favorite[] })),
           api<ReposResponse>('/api/repos').catch(() => ({ repos: [] as Repo[], controlPath: '' })),
-          api<SessionState>(`/api/session${winQuery}`).catch(() => null),
+          resetRequested ? null : api<SessionState>(`/api/session${winQuery}`).catch(() => null),
           api<ModulesResponse>('/api/modules').catch(() => null),
         ]);
         if (cancelled) return;
@@ -2249,7 +2268,10 @@ async function readTab(filePath: string, viewMode?: OpenTab['viewMode'], folder?
       savedContent: file.binary ? '' : file.content,
       binary: file.binary,
     };
-  } catch {
+  } catch (err) {
+    // A file the editor refuses (too big) keeps its tab and says why: dropping
+    // it silently would hide the reader's own file from the restored layout.
+    if (err instanceof ApiError && err.status === 413) return { ...tab, error: err.message };
     return null;
   }
 }
