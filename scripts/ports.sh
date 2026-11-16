@@ -13,6 +13,7 @@
 #   +0 / +1   the install (stable)          e.g. 6030 api · 6031 ui
 #   +2 / +3   dev lane                      6032 / 6033
 #   +4 / +5   nightly lane                  6034 / 6035
+#   +6        auth gate in front of +0     6036
 #   +7 / +8 / +9  test harness              6037 dashboard · 6038 ui · 6039 api
 #
 # Feature previews sit at 604x-607x on every machine: they are throwaway, and a
@@ -44,6 +45,9 @@ RP_LANE_DEV_API=$(( RP_BASE + 2 ))
 RP_LANE_DEV_UI=$(( RP_BASE + 3 ))
 RP_LANE_NIGHTLY_API=$(( RP_BASE + 4 ))
 RP_LANE_NIGHTLY_UI=$(( RP_BASE + 5 ))
+# HTTP Basic gate in front of the install (remotepad-auth.service), so a phone or
+# a coffee-shop laptop can reach it without exposing an unauthenticated IDE.
+RP_LANE_AUTH=$(( RP_BASE + 6 ))
 
 RP_E2E_DASHBOARD=$(( RP_BASE + 7 ))
 RP_E2E_UI=$(( RP_BASE + 8 ))
