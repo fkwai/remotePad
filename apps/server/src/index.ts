@@ -69,6 +69,17 @@ if (fs.existsSync(webDist)) {
     }
     reply.sendFile('index.html');
   });
+} else {
+  // Dev: the UI is Vite on its own port (6001 in block 600). Answering the API
+  // port with a JSON 404 looks like a broken install, so send people to the UI.
+  app.setNotFoundHandler((req, reply) => {
+    if (req.raw.url?.startsWith('/api') || req.raw.url?.startsWith('/ws')) {
+      reply.code(404).send({ error: 'Not found' });
+      return;
+    }
+    const hostName = (req.headers.host || '').split(':')[0] || config.host;
+    reply.redirect(`http://${hostName}:${config.uiPort}/`);
+  });
 }
 
 await app.listen({ host: config.host, port: config.port });
