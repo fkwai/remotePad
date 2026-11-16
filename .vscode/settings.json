@@ -1,0 +1,14 @@
+{
+  "remote.autoForwardPorts": true,
+  "remote.autoForwardPortsSource": "output",
+  "remote.portsAttributes": {
+    "5173": {
+      "label": "RemotePad UI",
+      "onAutoForward": "notify"
+    },
+    "3847": {
+      "label": "RemotePad API",
+      "onAutoForward": "silent"
+    }
+  }
+}
