@@ -14,6 +14,8 @@
 #   +2 / +3   dev lane                      6032 / 6033
 #   +4 / +5   nightly lane                  6034 / 6035
 #   +6        auth gate in front of +0     6036
+# A second long-lived checkout on the server is the dev lane there: same block,
+# same offsets, so the "cloud working copy" is simply dev in block 601.
 #   +7 / +8 / +9  test harness              6037 dashboard · 6038 ui · 6039 api
 #
 # Feature previews sit at 604x-607x on every machine: they are throwaway, and a
