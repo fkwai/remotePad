@@ -18,7 +18,12 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-WT="${REMOTEPAD_NIGHTLY_DIR:-/workspace/git/worktrees/remotepad-nightly}"
+# Ask git where the `nightly` worktree is rather than assuming one machine's
+# layout: the hardcoded path made the sync a no-op everywhere but the box it was
+# written on, so the lane silently kept serving whatever it was last checked out.
+WT="${REMOTEPAD_NIGHTLY_DIR:-$(git -C "$ROOT" worktree list --porcelain \
+  | awk '/^worktree /{p=$2} $0=="branch refs/heads/nightly"{print p; exit}')}"
+[ -n "$WT" ] || WT="$(cd "$ROOT/.." && pwd)/worktrees/remotepad-nightly"
 BASE="${REMOTEPAD_NIGHTLY_BASE:-origin/dev}"
 
 STAMP="$(date +%Y%m%d)"
