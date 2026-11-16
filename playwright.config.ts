@@ -6,8 +6,12 @@ const state = prepare();
 
 // Ports are env-driven so parallel worktrees (scripts/dev-worktree.sh) do not
 // collide; tests/server/* do not need them at all.
-const UI_PORT = Number(process.env.E2E_UI_PORT || 6008);
-const API_PORT = Number(process.env.E2E_API_PORT || 6009);
+// The test harness lives in this machine's port block (600 laptop, 601 server,
+// 603 the agent box), at +8 UI / +9 API. One scheme, offsets fixed.
+const BLOCK = Number(process.env.REMOTEPAD_PORT_BLOCK || 600);
+const BASE = 6000 + (BLOCK - 600) * 10;
+const UI_PORT = Number(process.env.E2E_UI_PORT || BASE + 8);
+const API_PORT = Number(process.env.E2E_API_PORT || BASE + 9);
 
 export default defineConfig({
   // tests/e2e = browser gestures, tests/server = node-level modules.

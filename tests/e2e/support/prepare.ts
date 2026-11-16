@@ -16,7 +16,11 @@ const statePath = path.join(stateDir, 'state.json');
 const sessionsDir = path.join(stateDir, 'agent-sessions');
 /** Cloud state the fake Dashboard serves; tests rewrite it per step. */
 const dashboardFile = path.join(stateDir, 'dashboard.json');
-const DASHBOARD_PORT = 6007;
+// The harness sits in this machine's block (600 laptop, 601 server, 603 agents)
+// at +7 dashboard, +8 UI, +9 API, so it never fights the instance you are using.
+const BLOCK = Number(process.env.REMOTEPAD_PORT_BLOCK || 600);
+const BASE = 6000 + (BLOCK - 600) * 10;
+const DASHBOARD_PORT = Number(process.env.E2E_DASHBOARD_PORT || BASE + 7);
 
 const files: Record<string, string> = {
   'a.md': '# Alpha\n\nMarkdown body.\n',
@@ -44,7 +48,7 @@ export interface E2EState {
  * Runs synchronously from playwright.config.ts, before any webServer starts.
  * Every piece of shared state is redirected into .e2e/:
  *  - HOME                -> .e2e/home (favorites, repos, plots, agent sessions);
- *  - REMOTEPAD_SETTINGS  -> .e2e/settings.json (API :6009, vite :6008);
+ *  - REMOTEPAD_SETTINGS  -> .e2e/settings.json (API :base+9, vite :base+8);
  *  - REMOTEPAD_SESSION_PATH -> .e2e/session.json (UI restore state);
  *  - fixtures            -> .e2e/work.
  * Nothing here touches the live app's data or this repo's tmp/.
@@ -67,8 +71,8 @@ export function prepare(): E2EState {
   process.env.REMOTEPAD_SHARED_STATE = path.join(home, '.remotepad');
 
   // Same ports the Playwright config boots the two servers on.
-  const apiPort = Number(process.env.E2E_API_PORT || 6009);
-  const uiPort = Number(process.env.E2E_UI_PORT || 6008);
+  const apiPort = Number(process.env.E2E_API_PORT || BASE + 9);
+  const uiPort = Number(process.env.E2E_UI_PORT || BASE + 8);
   fs.writeFileSync(settingsPath, JSON.stringify({ host: '127.0.0.1', port: apiPort, uiPort }, null, 2));
 
   // A seeded favorites store pins the fixture folder as the tree root, so tree
