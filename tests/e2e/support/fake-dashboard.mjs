@@ -11,7 +11,7 @@ import path from 'node:path';
  * `apps/server/src/catsco-chat.ts` reads.
  */
 const STATE_FILE = process.argv[2];
-const PORT = Number(process.argv[3] || 3871);
+const PORT = Number(process.argv[3] || 6007);
 
 const USER = { uid: '1', username: 'e2e', display_name: 'E2E user' };
 const BOT = { uid: '2', username: 'e2e-bot', display_name: 'CatsCo', isCurrent: true };

@@ -59,10 +59,15 @@ pnpm install
 pnpm dev
 ```
 
-Then open [http://127.0.0.1:5173](http://127.0.0.1:5173).
+Then open [http://127.0.0.1:6001](http://127.0.0.1:6001).
 
-- API/WebSocket server: `127.0.0.1:3847`
-- Vite dev UI: `127.0.0.1:5173` (proxies `/api` and `/ws`)
+- API/WebSocket server: `127.0.0.1:6000`
+- Vite dev UI: `127.0.0.1:6001` (proxies `/api` and `/ws`)
+
+Every port comes from one map, `scripts/ports.sh`: `600x` this machine, `601x` the
+shared server (`6010/6011` stable, `6012/6013` dev, `6014/6015` nightly), `604x-607x`
+feature previews. The leading digit says where a process runs, so a tunnel to the
+server can never shadow the copy in front of you.
 
 Production:
 
@@ -71,7 +76,7 @@ pnpm build
 pnpm start
 ```
 
-`pnpm start` serves the built UI from the Fastify process on port 3847.
+`pnpm start` serves the built UI from the Fastify process on port 6000.
 
 ## Tests
 
@@ -88,12 +93,12 @@ The suite lives in `tests/e2e/` and is configured by `playwright.config.ts`. It 
 
 | Shared resource | Test instance |
 | --- | --- |
-| API / UI ports | `3999` (Fastify) + `3998` (Vite dev), from `.e2e/settings.json` |
+| API / UI ports | `6009` (Fastify) + `6008` (Vite dev), from `.e2e/settings.json` |
 | `$HOME` | `.e2e/home`, so `~/.remotepad` (favorites, repos, plots, agent sessions) is never touched |
 | `tmp/session.json` | `.e2e/session.json` via `REMOTEPAD_SESSION_PATH` |
 | Fixtures | `.e2e/work` (`a.md`, `b.csv`, `notes.txt`, `sub/`) |
 
-`.e2e/` is recreated on every run and is gitignored. Tests never write to your own RemotePad state, so a live instance on 3847 can keep running while the suite executes.
+`.e2e/` is recreated on every run and is gitignored. Tests never write to your own RemotePad state, so a live instance on 6000 can keep running while the suite executes.
 
 ### What each spec covers
 
@@ -116,7 +121,7 @@ pnpm test:e2e tests/server                       # node modules (fast)
 pnpm test:e2e                                    # everything, before merge
 ```
 
-Ports are env-driven (`E2E_API_PORT`, `E2E_UI_PORT`, default 3999/3998) so several
+Ports are env-driven (`E2E_API_PORT`, `E2E_UI_PORT`, default 6009/6008) so several
 worktrees can run their own suite at the same time.
 
 
@@ -140,9 +145,9 @@ a process, and a process runs from a working tree — one checkout holds one bra
 
 | Lane | Branch | Port | How it starts |
 | --- | --- | --- | --- |
-| **stable** | `main` | 3847 | the install you already run |
-| **dev** | `dev` | 6210-ish | `scripts/lanes.sh start dev` |
-| **nightly** | `nightly` | 6120-ish | `scripts/lanes.sh start nightly` |
+| **stable** | `main` | 6010 | the install you already run |
+| **dev** | `dev` | 6012 | `scripts/lanes.sh start dev` |
+| **nightly** | `nightly` | 6014 | `scripts/lanes.sh start nightly` |
 
 `scripts/lanes.sh start` (both), `sync` (pull + restart), `status`, `stop <name>`.
 Each lane gets its own worktree, its own data directory and its own ports; your
@@ -153,8 +158,8 @@ port it is running on (**Open**) or the command to start it (**Start**). One
 tunnel per port you want to reach:
 
 ```bash
-ssh -N -L 6120:127.0.0.1:6120 <host>   # nightly
-ssh -N -L 6210:127.0.0.1:6210 <host>   # dev
+ssh -N -L 6014:127.0.0.1:6014 <host>   # nightly
+ssh -N -L 6012:127.0.0.1:6012 <host>   # dev
 ```
 
 Rules that keep this honest:
@@ -222,16 +227,16 @@ pnpm install          # first time only
 One-liner (same ports as repo `settings.json`):
 
 ```bash
-ssh -N -L 5173:127.0.0.1:5173 -L 3847:127.0.0.1:3847 user@remote-host
+ssh -N -L 6001:127.0.0.1:6001 -L 6000:127.0.0.1:6000 user@remote-host
 ```
 
 **3 — Browser**
 
-Open [http://127.0.0.1:5173](http://127.0.0.1:5173).
+Open [http://127.0.0.1:6001](http://127.0.0.1:6001).
 
 Using the same machine? Skip step 2.
 
-**Tailscale / LAN:** set `"host": "0.0.0.0"` in repo `settings.json`, run `pnpm build && REMOTEPAD_MODE=prod ./scripts/remotepad.sh up`, then browse `http://<tailscale-ip>:3847`.
+**Tailscale / LAN:** set `"host": "0.0.0.0"` in repo `settings.json`, run `pnpm build && REMOTEPAD_MODE=prod ./scripts/remotepad.sh up`, then browse `http://<tailscale-ip>:6000`.
 
 ### Always-on service (systemd)
 
@@ -254,7 +259,7 @@ loginctl enable-linger $USER   # run at boot even without a login session
 
 Check status: `systemctl --user status remotepad.service`
 
-The unit runs production mode (`pnpm start`, port 3847). For dev mode with hot reload, use `./scripts/remotepad.sh up` manually instead.
+The unit runs production mode (`pnpm start`, port 6000). For dev mode with hot reload, use `./scripts/remotepad.sh up` manually instead.
 
 ### Scripts
 
@@ -290,8 +295,8 @@ Repo `settings.json`: `host`, `port` (API / prod UI), `uiPort` (Vite dev only). 
 | Variable | Default | Meaning |
 | --- | --- | --- |
 | `REMOTEPAD_HOST` | `settings.json` → `127.0.0.1` | Bind address |
-| `REMOTEPAD_PORT` | `settings.json` → `3847` | Backend port |
-| `REMOTEPAD_UI_PORT` | `settings.json` → `5173` | Vite dev UI port |
+| `REMOTEPAD_PORT` | `settings.json` → `6000` | Backend port |
+| `REMOTEPAD_UI_PORT` | `settings.json` → `6001` | Vite dev UI port |
 | `REMOTEPAD_SETTINGS` | `<install>/settings.json` | Path to settings file |
 | `REMOTEPAD_SESSION_PATH` | `<install>/tmp/session.json` | UI restore state file (a test instance points this elsewhere so it never shares state with the live app) |
 | `REMOTEPAD_ROOTS` | _(empty)_ | Extra allowed filesystem roots, colon-separated |

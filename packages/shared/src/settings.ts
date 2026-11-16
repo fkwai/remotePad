@@ -1,8 +1,8 @@
 import fs from 'node:fs';
 
 export const DEFAULT_HOST = '127.0.0.1';
-export const DEFAULT_PORT = 3847;
-export const DEFAULT_UI_PORT = 5173;
+export const DEFAULT_PORT = 6000;
+export const DEFAULT_UI_PORT = 6001;
 
 export interface RemotePadSettings {
   host: string;

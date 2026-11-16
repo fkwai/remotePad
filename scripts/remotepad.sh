@@ -57,7 +57,7 @@ ui_url() {
 # Pids holding this instance's ports, so `down` can prove it really stopped.
 listeners() {
   command -v ss >/dev/null 2>&1 || return 0
-  ss -ltnp 2>/dev/null | grep -E ":(5173|3847)\b" | grep -o 'pid=[0-9]*' | cut -d= -f2 | sort -u | tr '\n' ' '
+  ss -ltnp 2>/dev/null | grep -E ":($UI_PORT|$PORT)\b" | grep -o 'pid=[0-9]*' | cut -d= -f2 | sort -u | tr '\n' ' '
 }
 
 cmd_dev() {
@@ -84,7 +84,7 @@ cmd_up() {
   echo "Starting RemotePad ($MODE) — log: $LOGFILE"
   # setsid makes the wrapper a process-group leader, so `down` can stop the
   # whole tree. Killing only the pnpm pid used to leave vite and tsx running,
-  # which then blocked the next start with "Port 5173 is already in use".
+  # which then blocked the next start with "port already in use".
   if [[ "$MODE" == prod ]]; then
     nohup setsid pnpm start >>"$LOGFILE" 2>&1 &
   else

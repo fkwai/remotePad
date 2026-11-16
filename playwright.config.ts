@@ -6,8 +6,8 @@ const state = prepare();
 
 // Ports are env-driven so parallel worktrees (scripts/dev-worktree.sh) do not
 // collide; tests/server/* do not need them at all.
-const UI_PORT = Number(process.env.E2E_UI_PORT || 3998);
-const API_PORT = Number(process.env.E2E_API_PORT || 3999);
+const UI_PORT = Number(process.env.E2E_UI_PORT || 6008);
+const API_PORT = Number(process.env.E2E_API_PORT || 6009);
 
 export default defineConfig({
   // tests/e2e = browser gestures, tests/server = node-level modules.

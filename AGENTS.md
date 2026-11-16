@@ -169,7 +169,8 @@ Work on a branch in this checkout when the user asks to persist. Branch naming f
 
 ## Lanes
 
-- **stable** — `main`, the install on 3847. Release channel; **Update N** pulls it.
+- **stable** — `main`, the install on 6010. Release channel; **Update N** pulls it.
+- **Ports** — one map, `scripts/ports.sh`: `600x` this machine, `601x` the server (`6010/6011` stable, `6012/6013` dev, `6014/6015` nightly), `604x-607x` previews. Never hardcode a port elsewhere.
 - **dev** — small fixes land here directly (`commit → push origin dev`), no worktree, no PR.
 - **nightly** — a mirror of `dev`, refreshed when the lane is opened (`preview.sh nightly` → `scripts/nightly-sync.sh`: reset to `origin/dev`, stamp `X.Y.Z-nightly.DATE`, typecheck, roll back if the gate fails). Published `origin/nightly` is built by `.github/workflows/nightly.yml` at 00:00 UTC; nothing on this box has to stay running for it.
 - **feature** — a worktree for risky work: `./scripts/preview.sh <feature> origin/dev`, then merge into `dev`.
@@ -217,6 +218,6 @@ Loop:
 
 - Typecheck / build when the change warrants it (`pnpm` filters for `@remotepad/web` / `@remotepad/server`).
 - For UI: describe what to click. For Agent host: note that the server may need a restart.
-- Run the spec for the area you touched (`npx playwright test tests/e2e/<area>.spec.ts`, or `tests/server/...` for node modules); run the full suite before merge. The suite boots a throwaway instance on ports 3998/3999 (override with `E2E_API_PORT`/`E2E_UI_PORT`) with `HOME=.e2e/home`, `REMOTEPAD_SESSION_PATH=.e2e/session.json` and fixtures in `.e2e/work`, so the live app on 3847 is untouched.
+- Run the spec for the area you touched (`npx playwright test tests/e2e/<area>.spec.ts`, or `tests/server/...` for node modules); run the full suite before merge. The suite boots a throwaway instance on ports 6008/6009 (override with `E2E_API_PORT`/`E2E_UI_PORT`) with `HOME=.e2e/home`, `REMOTEPAD_SESSION_PATH=.e2e/session.json` and fixtures in `.e2e/work`, so the live app on 6000 is untouched.
 - Gesture changes: add or fix a spec under `tests/e2e/`. Independent feature → new file; related behaviour → extend the existing file.
 - If a spec fails: `pnpm test:e2e:headed` to watch the click, or `npx playwright show-trace test-results/<spec>/trace.zip`.

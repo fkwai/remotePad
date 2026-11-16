@@ -34,12 +34,13 @@ if [ -e "$WT" ]; then
   exit 1
 fi
 
-# Deterministic, collision-resistant ports from the feature name.
-SEED=$(( $(printf '%s' "$NAME" | cksum | cut -d' ' -f1) % 150 ))
-API=$(( 4200 + SEED ))
-UI=$(( 4500 + SEED ))
-E2E_API=$(( 4800 + SEED ))
-E2E_UI=$(( 5100 + SEED ))
+# Ports come from scripts/ports.sh, the one map every script reads.
+. "$ROOT/scripts/ports.sh"
+read -r API UI <<< "$(rp_ports_for "$NAME")"
+# The test harness is machine-local and fixed: a worktree has no business
+# inventing a fourth scheme for it.
+E2E_API=$RP_E2E_API
+E2E_UI=$RP_E2E_UI
 
 mkdir -p "$WT_ROOT"
 # A lane (dev, nightly, main) is a standing branch and runs on its own name; only

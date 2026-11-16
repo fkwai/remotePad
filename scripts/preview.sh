@@ -10,7 +10,7 @@
 # The preview never touches the instance the user is working in:
 #   - its own worktree (helper/<feature>), own node_modules
 #   - its own HOME (~/.remotepad-preview/<feature>): favorites, repos, sessions
-#   - its own settings file, ports (61xx) and session restore state
+#   - its own settings file, ports (see scripts/ports.sh) and session restore state
 #   - its own process group, so stopping it cannot reload or kill the live server
 #
 # Nothing is restarted and no live file is written: the user keeps working while
@@ -26,9 +26,15 @@ MAIN="$(git -C "$ROOT" rev-parse --path-format=absolute --git-common-dir 2>/dev/
 [ -n "${MAIN:-}" ] || MAIN="$ROOT"
 PREVIEWS="$MAIN/.previews"
 
+# Every port comes from scripts/ports.sh: 600x local, 601x lanes on the server,
+# 604x-607x previews. Nothing here invents a range.
+. "$ROOT/scripts/ports.sh"
+
 port_for() {
-  local name="$1" offset="$2"
-  printf '%s' "$(( 6100 + ($(printf '%s' "$name" | cksum | cut -d' ' -f1) % 90) * 2 + offset ))"
+  local name="$1" offset="$2" pair
+  pair="$(rp_ports_for "$name")"
+  set -- $pair
+  if [ "$offset" = 0 ]; then printf '%s' "$2"; else printf '%s' "$1"; fi
 }
 
 dir_for() { printf '%s' "$PREVIEWS/$1"; }

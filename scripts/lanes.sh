@@ -7,11 +7,11 @@
 #   scripts/lanes.sh stop  <name>
 #
 # Why worktrees: a port belongs to a process, and a process runs from a working
-# tree. One checkout can only have one branch checked out, so "dev on :6210 while
-# stable runs on :3847" needs a second working tree — never a branch switch in the
+# tree. One checkout can only have one branch checked out, so "dev on :6012 while
+# stable runs on :6010" needs a second working tree — never a branch switch in the
 # tree you are using.
 #
-# The stable lane is the install you already run (it owns 3847); this script only
+# The stable lane is the install you already run (it owns 6010); this script only
 # manages the lanes beside it. `preview.sh` does the work, so lanes and feature
 # previews share one mechanism, one HOME layout and one tunnel story.
 set -euo pipefail
@@ -33,7 +33,7 @@ start_lane() {
   local name="$1" branch
   branch="$(lane_branch "$name")" || { echo "unknown lane: $name" >&2; return 1; }
   if [ "$name" = stable ]; then
-    echo "stable is the install you are already running (port 3847) — nothing to start."
+    echo "stable is the install you are already running (port 6010) — nothing to start."
     return 0
   fi
   # preview.sh <name> origin/<branch> runs the lane on its own branch name.
@@ -64,7 +64,7 @@ case "$ACTION" in
   status)
     "$ROOT/scripts/preview.sh" status
     echo
-    echo "stable runs on 3847 (the install). dev and nightly run from their own worktrees."
+    echo "stable runs on 6010 (the install). dev and nightly run from their own worktrees."
     echo "Each port needs its own tunnel: ssh -N -L <port>:127.0.0.1:<port> <host>"
     ;;
   ""|-h|--help)

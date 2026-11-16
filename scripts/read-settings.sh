@@ -21,5 +21,5 @@ PY
 }
 
 export REMOTEPAD_HOST="${REMOTEPAD_HOST:-$(_rp_setting host 127.0.0.1)}"
-export REMOTEPAD_PORT="${REMOTEPAD_PORT:-$(_rp_setting port 3847)}"
-export REMOTEPAD_UI_PORT="${REMOTEPAD_UI_PORT:-$(_rp_setting uiPort 5173)}"
+export REMOTEPAD_PORT="${REMOTEPAD_PORT:-$(_rp_setting port 6000)}"
+export REMOTEPAD_UI_PORT="${REMOTEPAD_UI_PORT:-$(_rp_setting uiPort 6001)}"
