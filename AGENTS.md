@@ -170,7 +170,7 @@ Work on a branch in this checkout when the user asks to persist. Branch naming f
 ## Lanes
 
 - **stable** — `main`, the install on 6010. Release channel; **Update N** pulls it.
-- **Ports** — one map, `scripts/ports.sh`: `600x` this machine, `601x` the server (`6010/6011` stable, `6012/6013` dev, `6014/6015` nightly), `604x-607x` previews. Never hardcode a port elsewhere.
+- **Ports** — one map, `scripts/ports.sh`: a block of ten per machine (`600` laptop, `601` server, `603` agent box) with the same offsets everywhere — `+0/+1` install, `+2/+3` dev, `+4/+5` nightly, `+6` auth, `+7/+8/+9` tests — plus `604x-607x` previews. The block comes from `REMOTEPAD_PORT_BLOCK`, then `~/.remotepad-port-block`. Never hardcode a port elsewhere.
 - **dev** — small fixes land here directly (`commit → push origin dev`), no worktree, no PR.
 - **nightly** — a mirror of `dev`, refreshed when the lane is opened (`preview.sh nightly` → `scripts/nightly-sync.sh`: reset to `origin/dev`, stamp `X.Y.Z-nightly.DATE`, typecheck, roll back if the gate fails). Published `origin/nightly` is built by `.github/workflows/nightly.yml` at 00:00 UTC; nothing on this box has to stay running for it.
 - **feature** — a worktree for risky work: `./scripts/preview.sh <feature> origin/dev`, then merge into `dev`.

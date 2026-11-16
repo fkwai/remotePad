@@ -64,10 +64,19 @@ Then open [http://127.0.0.1:6001](http://127.0.0.1:6001).
 - API/WebSocket server: `127.0.0.1:6000`
 - Vite dev UI: `127.0.0.1:6001` (proxies `/api` and `/ws`)
 
-Every port comes from one map, `scripts/ports.sh`: `600x` this machine, `601x` the
-shared server (`6010/6011` stable, `6012/6013` dev, `6014/6015` nightly), `604x-607x`
-feature previews. The leading digit says where a process runs, so a tunnel to the
-server can never shadow the copy in front of you.
+Every port comes from one block map, `scripts/ports.sh` — one block of ten per
+machine, identical offsets inside it:
+
+| Block | Machine | +0/+1 install | +2/+3 dev | +4/+5 nightly | +6 auth | +7/+8/+9 tests |
+| --- | --- | --- | --- | --- | --- | --- |
+| `600` | your laptop | 6000/6001 | 6002/6003 | 6004/6005 | 6006 | 6007-6009 |
+| `601` | the shared server | 6010/6011 | 6012/6013 | 6014/6015 | 6016 | 6017-6019 |
+| `603` | the agent box | 6030/6031 | 6032/6033 | 6034/6035 | 6036 | 6037-6039 |
+
+Feature previews stay at `604x-607x` on every machine. The block comes from
+`REMOTEPAD_PORT_BLOCK`, then `~/.remotepad-port-block`, then `600`, so an
+unmodified checkout comes up correctly on every host and a tunnel to the server
+can never shadow the copy in front of you.
 
 Production:
 
@@ -121,7 +130,7 @@ pnpm test:e2e tests/server                       # node modules (fast)
 pnpm test:e2e                                    # everything, before merge
 ```
 
-Ports are env-driven (`E2E_API_PORT`, `E2E_UI_PORT`, default 6009/6008) so several
+Ports are env-driven (`E2E_API_PORT`, `E2E_UI_PORT`, default block+9 / block+8) so several
 worktrees can run their own suite at the same time.
 
 
